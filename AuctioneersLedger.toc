@@ -1,0 +1,18 @@
+## Interface: 110105
+## Title: Auctioneer's Ledger
+## Author: Clint Seewald (CS&A-Software)
+## Version: 1.0.0
+## Notes: Version 1.0.0 - Release
+## SavedVariables: AL_SavedData
+## DefaultState: enabled
+## IconTexture: Interface\Icons\inv_7xp_inscription_talenttome01
+## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0
+
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+# Main addon code
+AuctioneersLedger.lua
