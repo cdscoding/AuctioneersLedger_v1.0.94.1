@@ -1,16 +1,16 @@
--- Auctioneer's Ledger - v1.0.17 - Created by Clint Seewald (CS&A-Software)
+-- Auctioneer's Ledger - v1.0.23 - Created by Clint Seewald (CS&A-Software)
 local ADDON_NAME = "AuctioneersLedger";
 local LDB_PREFIX = "AuctioneersLedgerDB";
 
 local AL = {};
 _G.AL = AL;
 
-AL.VERSION = "1.0.17";
+AL.VERSION = "1.0.23";
 
 -- Constants (Layout and Appearance) 
 AL.COL_PADDING = 5;
 AL.ICON_TEXT_PADDING = 4;
-AL.ITEM_ICON_SIZE = 18; AL.COL_ICON_WIDTH = AL.ITEM_ICON_SIZE; AL.COL_NAME_TEXT_WIDTH = 230;
+AL.ITEM_ICON_SIZE = 18; AL.COL_ICON_WIDTH = AL.ITEM_ICON_SIZE; AL.COL_NAME_TEXT_WIDTH = 380; 
 AL.COL_LOCATION_WIDTH = 100; AL.COL_OWNED_WIDTH = 60;
 AL.COL_NOTES_WIDTH = 130;
 AL.COL_CHARACTER_WIDTH = 100;
@@ -23,7 +23,7 @@ AL.PARENT_ICON_AREA_X_OFFSET = 0;
 AL.CHILD_ICON_AREA_X_OFFSET = 0;
 AL.EFFECTIVE_NAME_COL_WIDTH = AL.EXPAND_BUTTON_SIZE + AL.ICON_TEXT_PADDING + AL.COL_ICON_WIDTH + AL.ICON_TEXT_PADDING + AL.COL_NAME_TEXT_WIDTH;
 AL.LEFT_PANEL_WIDTH = 200;
-AL.MIN_WINDOW_WIDTH = 1150; 
+AL.MIN_WINDOW_WIDTH = 1320; 
 AL.MIN_WINDOW_HEIGHT = 770; 
 AL.DIVIDER_THICKNESS = 4; AL.WINDOW_DIVIDER_COLOR = {0.45, 0.45, 0.45, 0.8};
 AL.HELP_WINDOW_WIDTH = 740;
@@ -33,7 +33,7 @@ AL.LABEL_TEXT_COLOR = {1, 0.82, 0, 1};
 AL.CHILD_ROW_DATA_JUSTIFY_H = "CENTER";
 
 -- Constants (Functional)
-AL.DEFAULT_WINDOW_WIDTH = 1150; 
+AL.DEFAULT_WINDOW_WIDTH = 1320; 
 AL.DEFAULT_WINDOW_HEIGHT = 770; 
 AL.BUTTON_HEIGHT = 24; AL.BUTTON_SPACING = 6;
 AL.POPUP_WIDTH = 240; AL.POPUP_HEIGHT = 160;
@@ -97,7 +97,7 @@ local function InitializeTrackedItemEntry(itemEntry, currentCharacterName, curre
     itemEntry.lastVerifiedTimestamp = itemEntry.lastVerifiedTimestamp or 0;
     itemEntry.characterName = itemEntry.characterName or currentCharacterName;
     itemEntry.characterRealm = itemEntry.characterRealm or currentCharacterRealm;
-    itemEntry.awaitingMailAfterAuctionCancel = itemEntry.awaitingMailAfterAuctionCancel or false; -- Initialize new flag
+    itemEntry.awaitingMailAfterAuctionCancel = itemEntry.awaitingMailAfterAuctionCancel or false; 
 end
 
 -- Initialize AL table fields
@@ -120,6 +120,7 @@ AL.mailAPIsMissingLogged = false;
 AL.mailRefreshTimer = nil;
 AL.ahEntryDumpDone = false;
 AL.gameFullyInitialized = false; 
+AL.warbandEnumWarningShown = false; 
 AL.currentSortCriteria = _G.AL_SavedData.lastSortCriteria or AL.SORT_ALPHA;
 AL.currentViewMode = _G.AL_SavedData.viewMode or "GROUPED_BY_ITEM";
 AL.currentQualityFilter = _G.AL_SavedData.activeQualityFilter;
@@ -257,7 +258,6 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
     local isCurrentCharacterItemForPersonalCheck = (itemCharacterName == currentCharacter and itemCharacterRealm == currentRealm);
     local itemFoundLiveThisPass = false;
 
-    -- 1. Check current character's personal inventory (Bags, Bank, Reagent Bank)
     if isCurrentCharacterItemForPersonalCheck then
         local bagsCount = GetItemCount(itemID, false, false, false); 
         if bagsCount > 0 then 
@@ -280,7 +280,6 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
         end
     end
 
-    -- 2. Check Warband Bank (Account-wide)
     if not itemFoundLiveThisPass then
         local totalWarbandBankCount = 0;
         if Enum and type(Enum.BagIndex) == "table" then
@@ -318,12 +317,8 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
         end
     end
     
-    -- 3. Handle Auction House and Mail for current character items
     if isCurrentCharacterItemForPersonalCheck then
-        -- Auction House Logic
-        local itemWasOnAH = (trackedItemEntry.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE);
         local itemFoundOnAHLive = false;
-
         if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
             local ahCountThisScan = 0;
             local cahType = type(C_AuctionHouse); local goaType = cahType == "table" and type(C_AuctionHouse.GetOwnedAuctions) or "nil";
@@ -349,11 +344,11 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
                 end
             end
         end
-        if itemWasOnAH and AuctionHouseFrame and AuctionHouseFrame:IsShown() and not itemFoundOnAHLive then
+        -- If item was on AH, but now AH is open and item not found live, it means it was sold/cancelled/expired.
+        if trackedItemEntry.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE and AuctionHouseFrame and AuctionHouseFrame:IsShown() and not itemFoundOnAHLive then
             trackedItemEntry.awaitingMailAfterAuctionCancel = true;
         end
 
-        -- Mail Logic
         local shouldCheckMail = (MailFrame and MailFrame:IsShown()) or trackedItemEntry.awaitingMailAfterAuctionCancel;
         if not itemFoundLiveThisPass and shouldCheckMail then 
             if MailFrame and MailFrame:IsShown() then
@@ -377,14 +372,13 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
                 if mailCountThisScan > 0 then
                     d.liveLocation = AL.LOCATION_MAIL; d.liveCount = mailCountThisScan; itemFoundLiveThisPass = true;
                     trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
-                elseif trackedItemEntry.awaitingMailAfterAuctionCancel then
+                elseif trackedItemEntry.awaitingMailAfterAuctionCancel then 
                     trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
                 end
             end
         end
     end
 
-    -- 4. Finalize location based on live scans or fall back to stale/Limbo
     if itemFoundLiveThisPass then
         d.locationText = d.liveLocation;
         d.displayText = string.format("%02d", d.liveCount);
@@ -397,13 +391,14 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
         d.isStale = false; 
     else 
         local wasInDirectPersonalPossession = isCurrentCharacterItemForPersonalCheck and
+                                            trackedItemEntry.lastVerifiedLocation and
                                             (trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BAGS or
                                              trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BANK or
                                              trackedItemEntry.lastVerifiedLocation == AL.LOCATION_REAGENT_BANK);
 
         if isCurrentCharacterItemForPersonalCheck and trackedItemEntry.awaitingMailAfterAuctionCancel then
             d.locationText = AL.LOCATION_MAIL;
-            d.liveCount = trackedItemEntry.lastVerifiedCount > 0 and trackedItemEntry.lastVerifiedCount or 1; 
+            d.liveCount = trackedItemEntry.lastVerifiedCount > 0 and trackedItemEntry.lastVerifiedCount or 0; 
             d.displayText = string.format("%02d", d.liveCount);
             d.isStale = true;
             d.notesText = "Returning from AH";
@@ -468,9 +463,9 @@ function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
         itemID = itemID, itemLink = realItemLink, itemName = itemName, itemTexture = itemTexture, itemRarity = itemRarity,
         characterName = forCharName, characterRealm = forCharRealm,
         lastVerifiedLocation = nil, lastVerifiedCount = 0, lastVerifiedTimestamp = 0,
-        awaitingMailAfterAuctionCancel = false -- Initialize new flag
+        awaitingMailAfterAuctionCancel = false 
     };
-    InitializeTrackedItemEntry(itemData, forCharName, forCharRealm);
+    InitializeTrackedItemEntry(itemData, forCharName, forCharRealm); 
     table.insert(_G.AL_SavedData.trackedItems, itemData);
     return true, "Item Added Successfully"; 
 end
@@ -762,12 +757,21 @@ function AL:CreateItemRowFrame(parent, itemData, yOffset, isEvenRow, precomputed
     r.icon:SetTexture(itemData.itemTexture or "Interface\\Icons\\inv_misc_questionmark");
 
     local nameFsX = iconActualX + AL.ITEM_ICON_SIZE + AL.ICON_TEXT_PADDING;
-    r.nameFS = r:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall");
-    r.nameFS:SetHeight(AL.ITEM_ROW_HEIGHT);
+    
+    -- Create a clipping frame for the item name
+    r.nameFrame = CreateFrame("Frame", nil, r);
+    r.nameFrame:SetSize(AL.COL_NAME_TEXT_WIDTH, AL.ITEM_ROW_HEIGHT);
+    r.nameFrame:SetPoint("LEFT", r, "LEFT", nameFsX, 0);
+    r.nameFrame:SetClipsChildren(true);  -- This ensures name text doesn't overflow
+
+    -- Create the FontString inside the clipping frame
+    r.nameFS = r.nameFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall");
+    r.nameFS:SetAllPoints(true); -- Make FontString fill the nameFrame
     r.nameFS:SetJustifyH("LEFT"); 
     r.nameFS:SetJustifyV("MIDDLE");
-    r.nameFS:SetWidth(AL.COL_NAME_TEXT_WIDTH);
-    r.nameFS:SetPoint("LEFT", r, "LEFT", nameFsX, 0);
+    r.nameFS:SetWordWrap(false); 
+    r.nameFS:SetNonSpaceWrap(false); 
+    r.nameFS:SetMaxLines(1); 
 
     local dataColBaseX = AL.COL_PADDING + AL.EFFECTIVE_NAME_COL_WIDTH + AL.COL_PADDING;
 
@@ -1598,7 +1602,7 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         AL:HandlePlayerLogin();
     elseif event == "PLAYER_ENTERING_WORLD" then
         AL:HandlePlayerEnteringWorld();
-    elseif event=="BAG_UPDATE" or event=="AUCTION_HOUSE_CLOSED" or event=="MAIL_INBOX_UPDATE" or event=="MAIL_CLOSED" or event == "MAIL_SEND_SUCCESS" or event == "OWNED_AUCTIONS_UPDATED" or event == "MERCHANT_CLOSED" then 
+    elseif event=="BAG_UPDATE" or event=="AUCTION_HOUSE_CLOSED" or event=="MAIL_INBOX_UPDATE" or event=="MAIL_CLOSED" or event == "MAIL_SEND_SUCCESS" or event == "MERCHANT_CLOSED" then 
         AL:TriggerDebouncedRefresh(event);
     elseif event == "AUCTION_HOUSE_SHOW" then
         if C_AuctionHouse and type(C_AuctionHouse.RequestOwnerAuctionItems) == "function" then
@@ -1607,5 +1611,36 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         AL:TriggerDebouncedRefresh(event); 
     elseif event == "MAIL_SHOW" then
         AL:HandleMailShow(); 
+    elseif event == "OWNED_AUCTIONS_UPDATED" then
+        -- When the owned auction list updates, iterate through tracked items.
+        -- If an item was on AH and is now gone from the live AH list, flag it as awaiting mail.
+        if C_AuctionHouse and type(C_AuctionHouse.GetOwnedAuctions) == "function" and _G.AL_SavedData and _G.AL_SavedData.trackedItems then
+            local currentCharacter = UnitName("player");
+            local currentRealm = GetRealmName();
+            local liveAuctions = C_AuctionHouse.GetOwnedAuctions();
+            local liveAuctionItemIDs = {};
+            if liveAuctions and type(liveAuctions) == "table" then
+                for _, auctionEntry in ipairs(liveAuctions) do
+                    local entryItemID;
+                    if auctionEntry and type(auctionEntry) == "table" then
+                        if auctionEntry.itemKey and type(auctionEntry.itemKey) == "table" and auctionEntry.itemKey.itemID and type(auctionEntry.itemKey.itemID) == "number" then 
+                            entryItemID = auctionEntry.itemKey.itemID; 
+                        elseif auctionEntry.itemLink and type(auctionEntry.itemLink) == "string" then
+                            entryItemID = AL:GetItemIDFromLink(auctionEntry.itemLink);
+                        end
+                    end
+                    if entryItemID then liveAuctionItemIDs[entryItemID] = true; end
+                end
+            end
+
+            for _, entry in ipairs(_G.AL_SavedData.trackedItems) do
+                if entry.characterName == currentCharacter and entry.characterRealm == currentRealm and entry.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE then
+                    if not liveAuctionItemIDs[entry.itemID] then
+                        entry.awaitingMailAfterAuctionCancel = true;
+                    end
+                end
+            end
+        end
+        AL:TriggerDebouncedRefresh(event); 
     end
 end);
