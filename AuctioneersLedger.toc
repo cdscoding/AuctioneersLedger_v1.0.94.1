@@ -1,8 +1,8 @@
 ## Interface: 110105
 ## Title: Auctioneer's Ledger
 ## Author: Clint Seewald (CS&A-Software)
-## Version: 1.0.17
-## Notes: Version 1.0.17
+## Version: 1.0.23
+## Notes: Version 1.0.23
 ## SavedVariables: AL_SavedData
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\inv_7xp_inscription_talenttome01
