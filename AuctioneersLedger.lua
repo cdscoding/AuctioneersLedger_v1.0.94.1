@@ -1,11 +1,11 @@
--- Auctioneer's Ledger - v1.0.12 - Created by Clint Seewald (CS&A-Software)
+-- Auctioneer's Ledger - v1.0.17 - Created by Clint Seewald (CS&A-Software)
 local ADDON_NAME = "AuctioneersLedger";
 local LDB_PREFIX = "AuctioneersLedgerDB";
 
 local AL = {};
 _G.AL = AL;
 
-AL.VERSION = "1.0.12";
+AL.VERSION = "1.0.17";
 
 -- Constants (Layout and Appearance) 
 AL.COL_PADDING = 5;
@@ -97,6 +97,7 @@ local function InitializeTrackedItemEntry(itemEntry, currentCharacterName, curre
     itemEntry.lastVerifiedTimestamp = itemEntry.lastVerifiedTimestamp or 0;
     itemEntry.characterName = itemEntry.characterName or currentCharacterName;
     itemEntry.characterRealm = itemEntry.characterRealm or currentCharacterRealm;
+    itemEntry.awaitingMailAfterAuctionCancel = itemEntry.awaitingMailAfterAuctionCancel or false; -- Initialize new flag
 end
 
 -- Initialize AL table fields
@@ -119,7 +120,6 @@ AL.mailAPIsMissingLogged = false;
 AL.mailRefreshTimer = nil;
 AL.ahEntryDumpDone = false;
 AL.gameFullyInitialized = false; 
--- AL.warbandEnumWarningShown = false; -- Removed as Enum.BagIndex is confirmed working
 AL.currentSortCriteria = _G.AL_SavedData.lastSortCriteria or AL.SORT_ALPHA;
 AL.currentViewMode = _G.AL_SavedData.viewMode or "GROUPED_BY_ITEM";
 AL.currentQualityFilter = _G.AL_SavedData.activeQualityFilter;
@@ -242,7 +242,7 @@ end
 function AL:GetItemOwnershipDetails(trackedItemEntry)
     local d = {
         liveLocation = nil, liveCount = 0,
-        locationText = AL.LOCATION_LIMBO,
+        locationText = AL.LOCATION_LIMBO, 
         colorR, colorG, colorB, colorA = unpack(AL.COLOR_LIMBO),
         displayText = "00", notesText = "", isStale = false, isLink = false
     };
@@ -257,34 +257,30 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
     local isCurrentCharacterItemForPersonalCheck = (itemCharacterName == currentCharacter and itemCharacterRealm == currentRealm);
     local itemFoundLiveThisPass = false;
 
+    -- 1. Check current character's personal inventory (Bags, Bank, Reagent Bank)
     if isCurrentCharacterItemForPersonalCheck then
         local bagsCount = GetItemCount(itemID, false, false, false); 
         if bagsCount > 0 then 
-            d.liveLocation = AL.LOCATION_BAGS; 
-            d.liveCount = bagsCount; 
-            itemFoundLiveThisPass = true;
+            d.liveLocation = AL.LOCATION_BAGS; d.liveCount = bagsCount; itemFoundLiveThisPass = true;
         end
 
         if not itemFoundLiveThisPass then
             local totalInBagsAndBank = GetItemCount(itemID, true, false, false); 
             local bankCount = totalInBagsAndBank - bagsCount;
             if bankCount > 0 then 
-                d.liveLocation = AL.LOCATION_BANK; 
-                d.liveCount = bankCount; 
-                itemFoundLiveThisPass = true;
+                d.liveLocation = AL.LOCATION_BANK; d.liveCount = bankCount; itemFoundLiveThisPass = true;
             end
         end
         
         if not itemFoundLiveThisPass then
             local reagentBankCount = GetItemCount(itemID, false, false, true); 
             if reagentBankCount > 0 then
-                d.liveLocation = AL.LOCATION_REAGENT_BANK;
-                d.liveCount = reagentBankCount;
-                itemFoundLiveThisPass = true;
+                d.liveLocation = AL.LOCATION_REAGENT_BANK; d.liveCount = reagentBankCount; itemFoundLiveThisPass = true;
             end
         end
     end
 
+    -- 2. Check Warband Bank (Account-wide)
     if not itemFoundLiveThisPass then
         local totalWarbandBankCount = 0;
         if Enum and type(Enum.BagIndex) == "table" then
@@ -293,7 +289,6 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
                 Enum.BagIndex.AccountBankTab_4, Enum.BagIndex.AccountBankTab_5, Enum.BagIndex.AccountBankTab_6,
                 Enum.BagIndex.AccountBankTab_7
             };
-            -- Removed one-time warning as Enum.BagIndex is confirmed to be working
             for _, warbandBagID in ipairs(potentialWarbandTabs) do
                 if warbandBagID and type(warbandBagID) == "number" then
                     local numSlots = GetSafeContainerNumSlots(warbandBagID);
@@ -318,28 +313,51 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
                 end
             end
         end
-
         if totalWarbandBankCount > 0 then
-            d.liveLocation = AL.LOCATION_WARBAND_BANK;
-            d.liveCount = totalWarbandBankCount;
-            itemFoundLiveThisPass = true; 
+            d.liveLocation = AL.LOCATION_WARBAND_BANK; d.liveCount = totalWarbandBankCount; itemFoundLiveThisPass = true; 
         end
     end
     
-    if itemFoundLiveThisPass then
-        d.locationText = d.liveLocation;
-        d.displayText = string.format("%02d", d.liveCount);
-        if d.liveLocation == AL.LOCATION_BAGS then d.isLink = true; else d.isLink = false; end
-        
-        trackedItemEntry.lastVerifiedLocation = d.liveLocation;
-        trackedItemEntry.lastVerifiedCount = d.liveCount;
-        trackedItemEntry.lastVerifiedTimestamp = GetTime();
-        d.notesText = ""; 
-        d.isStale = false; 
-    else 
-        if isCurrentCharacterItemForPersonalCheck then
-            local mailCountThisScan = 0;
+    -- 3. Handle Auction House and Mail for current character items
+    if isCurrentCharacterItemForPersonalCheck then
+        -- Auction House Logic
+        local itemWasOnAH = (trackedItemEntry.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE);
+        local itemFoundOnAHLive = false;
+
+        if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
+            local ahCountThisScan = 0;
+            local cahType = type(C_AuctionHouse); local goaType = cahType == "table" and type(C_AuctionHouse.GetOwnedAuctions) or "nil";
+            if goaType == "function" then
+                local ownedAuctionsTable = C_AuctionHouse.GetOwnedAuctions();
+                if ownedAuctionsTable and type(ownedAuctionsTable) == "table" then
+                    for i, auctionEntry in ipairs(ownedAuctionsTable) do
+                        local entryItemID, entryItemCount;
+                        if auctionEntry and type(auctionEntry) == "table" then
+                            if auctionEntry.itemKey and type(auctionEntry.itemKey) == "table" and auctionEntry.itemKey.itemID and type(auctionEntry.itemKey.itemID) == "number" then entryItemID = auctionEntry.itemKey.itemID; end
+                            if auctionEntry.quantity and type(auctionEntry.quantity) == "number" then entryItemCount = auctionEntry.quantity; end
+                            if not entryItemID and auctionEntry.itemLink and type(auctionEntry.itemLink) == "string" then entryItemID = self:GetItemIDFromLink(auctionEntry.itemLink); if not entryItemCount and auctionEntry.count and type(auctionEntry.count) == "number" then entryItemCount = auctionEntry.count; end end
+                        end
+                        if entryItemID and entryItemCount and tonumber(entryItemID) == itemID then ahCountThisScan = ahCountThisScan + entryItemCount; end
+                    end
+                end
+                if ahCountThisScan > 0 then
+                    if not itemFoundLiveThisPass then
+                        d.liveLocation = AL.LOCATION_AUCTION_HOUSE; d.liveCount = ahCountThisScan; itemFoundLiveThisPass = true;
+                    end
+                    itemFoundOnAHLive = true;
+                    trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
+                end
+            end
+        end
+        if itemWasOnAH and AuctionHouseFrame and AuctionHouseFrame:IsShown() and not itemFoundOnAHLive then
+            trackedItemEntry.awaitingMailAfterAuctionCancel = true;
+        end
+
+        -- Mail Logic
+        local shouldCheckMail = (MailFrame and MailFrame:IsShown()) or trackedItemEntry.awaitingMailAfterAuctionCancel;
+        if not itemFoundLiveThisPass and shouldCheckMail then 
             if MailFrame and MailFrame:IsShown() then
+                local mailCountThisScan = 0;
                 local ginType = type(GetInboxNumItems); local gihType = type(GetInboxHeaderInfo); local giType  = type(GetInboxItem); 
                 if ginType == "function" and gihType == "function" and giType == "function" then
                     local numInboxItems = GetInboxNumItems();
@@ -354,66 +372,64 @@ function AL:GetItemOwnershipDetails(trackedItemEntry)
                                 end
                             end
                         end
-                    end; AL.mailAPIsMissingLogged = false;
-                else
-                    if not AL.mailAPIsMissingLogged then DEFAULT_CHAT_FRAME:AddMessage(ADDON_NAME .. " (v" .. AL.VERSION .. ") Mail API Issue for [".. (trackedItemEntry.itemName or "ItemID("..itemID..")") .."]: Required functions missing."); AL.mailAPIsMissingLogged = true; end
+                    end
                 end
                 if mailCountThisScan > 0 then
                     d.liveLocation = AL.LOCATION_MAIL; d.liveCount = mailCountThisScan; itemFoundLiveThisPass = true;
+                    trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
+                elseif trackedItemEntry.awaitingMailAfterAuctionCancel then
+                    trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
                 end
-            end
-            
-            local ahCountThisScan = 0;
-            if not itemFoundLiveThisPass then 
-                local cahType = type(C_AuctionHouse); local goaType = cahType == "table" and type(C_AuctionHouse.GetOwnedAuctions) or "nil";
-                if goaType == "function" then
-                    if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
-                        local ownedAuctionsTable = C_AuctionHouse.GetOwnedAuctions();
-                        if ownedAuctionsTable and type(ownedAuctionsTable) == "table" then
-                            for i, auctionEntry in ipairs(ownedAuctionsTable) do
-                                local entryItemID, entryItemCount;
-                                if auctionEntry and type(auctionEntry) == "table" then
-                                    if auctionEntry.itemKey and type(auctionEntry.itemKey) == "table" and auctionEntry.itemKey.itemID and type(auctionEntry.itemKey.itemID) == "number" then entryItemID = auctionEntry.itemKey.itemID; end
-                                    if auctionEntry.quantity and type(auctionEntry.quantity) == "number" then entryItemCount = auctionEntry.quantity; end
-                                    if not entryItemID and auctionEntry.itemLink and type(auctionEntry.itemLink) == "string" then entryItemID = self:GetItemIDFromLink(auctionEntry.itemLink); if not entryItemCount and auctionEntry.count and type(auctionEntry.count) == "number" then entryItemCount = auctionEntry.count; end end
-                                end
-                                if entryItemID and entryItemCount and tonumber(entryItemID) == itemID then ahCountThisScan = ahCountThisScan + entryItemCount; end
-                            end
-                        end
-                        if ahCountThisScan > 0 then
-                            d.liveLocation = AL.LOCATION_AUCTION_HOUSE; d.liveCount = ahCountThisScan; itemFoundLiveThisPass = true;
-                        end
-                    end
-                end
-            end
-
-            if itemFoundLiveThisPass then
-                d.locationText = d.liveLocation; 
-                d.displayText = string.format("%02d", d.liveCount); d.notesText = ""; d.isStale = false;
-                trackedItemEntry.lastVerifiedLocation = d.liveLocation;
-                trackedItemEntry.lastVerifiedCount = d.liveCount;
-                trackedItemEntry.lastVerifiedTimestamp = GetTime();
             end
         end
+    end
 
-        if not itemFoundLiveThisPass then 
-            if trackedItemEntry.lastVerifiedLocation and trackedItemEntry.lastVerifiedCount > 0 then
-                d.locationText = trackedItemEntry.lastVerifiedLocation;
-                d.displayText = string.format("%02d", trackedItemEntry.lastVerifiedCount);
-                d.isStale = true;
-                if trackedItemEntry.lastVerifiedLocation == AL.LOCATION_MAIL then d.notesText = "Inside mailbox.";
-                elseif trackedItemEntry.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE then d.notesText = "Being auctioned.";
-                elseif trackedItemEntry.lastVerifiedLocation == AL.LOCATION_WARBAND_BANK then d.notesText = "Warband Bank (Stale)"; 
-                elseif trackedItemEntry.lastVerifiedLocation == AL.LOCATION_REAGENT_BANK then d.notesText = "Reagent Bank (Stale)";
-                else d.notesText = ""; end
-                if trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BAGS then d.isLink = true; else d.isLink = false; end
-            else
-                d.locationText = AL.LOCATION_LIMBO; d.displayText = "00"; d.notesText = ""; d.isStale = false;
-                if isCurrentCharacterItemForPersonalCheck and (trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BAGS or trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BANK or trackedItemEntry.lastVerifiedLocation == AL.LOCATION_WARBAND_BANK or trackedItemEntry.lastVerifiedLocation == AL.LOCATION_REAGENT_BANK) then
-                    trackedItemEntry.lastVerifiedLocation = nil;
-                    trackedItemEntry.lastVerifiedCount = 0;
-                end
+    -- 4. Finalize location based on live scans or fall back to stale/Limbo
+    if itemFoundLiveThisPass then
+        d.locationText = d.liveLocation;
+        d.displayText = string.format("%02d", d.liveCount);
+        if d.liveLocation == AL.LOCATION_BAGS then d.isLink = true; else d.isLink = false; end
+        
+        trackedItemEntry.lastVerifiedLocation = d.liveLocation;
+        trackedItemEntry.lastVerifiedCount = d.liveCount;
+        trackedItemEntry.lastVerifiedTimestamp = GetTime();
+        d.notesText = ""; 
+        d.isStale = false; 
+    else 
+        local wasInDirectPersonalPossession = isCurrentCharacterItemForPersonalCheck and
+                                            (trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BAGS or
+                                             trackedItemEntry.lastVerifiedLocation == AL.LOCATION_BANK or
+                                             trackedItemEntry.lastVerifiedLocation == AL.LOCATION_REAGENT_BANK);
+
+        if isCurrentCharacterItemForPersonalCheck and trackedItemEntry.awaitingMailAfterAuctionCancel then
+            d.locationText = AL.LOCATION_MAIL;
+            d.liveCount = trackedItemEntry.lastVerifiedCount > 0 and trackedItemEntry.lastVerifiedCount or 1; 
+            d.displayText = string.format("%02d", d.liveCount);
+            d.isStale = true;
+            d.notesText = "Returning from AH";
+        elseif isCurrentCharacterItemForPersonalCheck and wasInDirectPersonalPossession then
+            d.locationText = AL.LOCATION_LIMBO; d.liveCount = 0; d.displayText = "00"; d.notesText = ""; d.isStale = false;
+            trackedItemEntry.lastVerifiedLocation = AL.LOCATION_LIMBO; 
+            trackedItemEntry.lastVerifiedCount = 0;
+            trackedItemEntry.lastVerifiedTimestamp = GetTime();
+            trackedItemEntry.awaitingMailAfterAuctionCancel = false; 
+        elseif trackedItemEntry.lastVerifiedLocation and trackedItemEntry.lastVerifiedCount > 0 then
+            d.locationText = trackedItemEntry.lastVerifiedLocation;
+            d.displayText = string.format("%02d", trackedItemEntry.lastVerifiedCount);
+            d.isStale = true;
+            d.notesText = ""; 
+            if d.locationText == AL.LOCATION_MAIL then d.notesText = "Inside mailbox.";
+            elseif d.locationText == AL.LOCATION_AUCTION_HOUSE then d.notesText = "Being auctioned.";
+            elseif d.locationText == AL.LOCATION_WARBAND_BANK then d.notesText = "Warband Bank (Stale)"; 
+            elseif d.locationText == AL.LOCATION_REAGENT_BANK then d.notesText = "Reagent Bank (Stale)";
             end
+            if d.locationText == AL.LOCATION_BAGS then d.isLink = true; end
+        else
+            d.locationText = AL.LOCATION_LIMBO; d.displayText = "00"; d.notesText = ""; d.isStale = false;
+            trackedItemEntry.lastVerifiedLocation = AL.LOCATION_LIMBO; 
+            trackedItemEntry.lastVerifiedCount = 0;
+            trackedItemEntry.lastVerifiedTimestamp = GetTime();
+            trackedItemEntry.awaitingMailAfterAuctionCancel = false;
         end
     end
 
@@ -451,7 +467,8 @@ function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
     local itemData = {
         itemID = itemID, itemLink = realItemLink, itemName = itemName, itemTexture = itemTexture, itemRarity = itemRarity,
         characterName = forCharName, characterRealm = forCharRealm,
-        lastVerifiedLocation = nil, lastVerifiedCount = 0, lastVerifiedTimestamp = 0
+        lastVerifiedLocation = nil, lastVerifiedCount = 0, lastVerifiedTimestamp = 0,
+        awaitingMailAfterAuctionCancel = false -- Initialize new flag
     };
     InitializeTrackedItemEntry(itemData, forCharName, forCharRealm);
     table.insert(_G.AL_SavedData.trackedItems, itemData);
@@ -1200,11 +1217,11 @@ function AL:PopulateHelpWindowText()
     table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Warband Bank (" .. CT(WARBAND_C, "Red Color") .. "): ") .. "Checked live (account-wide).\n");
     table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Mail (" .. CT(TAN_C, "Tan Color") .. "):") .. "\n");
     table.insert(textParts, indent .. "For the " .. CT(WHITE, "current character") .. ", your " .. CT(ORANGE, "Mailbox window MUST BE OPEN") .. " to detect items.\n");
-    table.insert(textParts, indent .. "If Mailbox is closed, last known mail items show with a note \"" .. CT(TAN_C, "Inside mailbox.") .. "\" and " .. CT(DIMMED_TEXT_C, "dimmed color") .. ".\n");
+    table.insert(textParts, indent .. "If Mailbox is closed, last known mail items show with a note \"" .. CT(TAN_C, "Inside mailbox.") .. "\" and " .. CT(DIMMED_TEXT_C, "dimmed color") .. ". Items returning from a cancelled/expired auction will also show as Mail (Stale) with a note \"" .. CT(TAN_C, "Returning from AH") .. "\" until the mailbox is opened.\n");
     table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Auction House (AH) (" .. CT(AH_BLUE_C, "Light Blue Color") .. "):") .. "\n");
     table.insert(textParts, indent .. "For the " .. CT(WHITE, "current character") .. ", AH window " .. CT(ORANGE, "MUST BE OPEN") .. " & you " .. CT(ORANGE, "MUST") .. " have clicked your \"" .. CT(HIGHLIGHT_C, "My Auctions") .. "\" tab that session to detect auctions.\n");
     table.insert(textParts, indent .. "If AH is closed/inactive, last known items show with a note \"" .. CT(AH_BLUE_C, "Being auctioned.") .. "\" and " .. CT(DIMMED_TEXT_C, "dimmed color") .. ".\n");
-    table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Limbo (" .. CT(LIMBO_C, "Gray Color") .. "):") .. " Item not found in any live or verifiable stale location for the " .. CT(WHITE, "current character") .. ". For " .. CT(WHITE, "alts") .. ", 'Limbo' (or a last known Mail/AH status with a note) is shown until you log into them and update their status.\n");
+    table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Limbo (" .. CT(LIMBO_C, "Gray Color") .. "):") .. " Item not found in any live or verifiable stale location for the " .. CT(WHITE, "current character") .. ". This status appears if you vendor, trade, or mail an item to another player. For " .. CT(WHITE, "alts") .. ", 'Limbo' (or a last known Mail/AH status with a note) is shown until you log into them and update their status.\n");
     table.insert(textParts, bullet .. CT(HIGHLIGHT_C, "Data for Alts:") .. " Information for characters you are not currently logged into reflects the " .. CT(WHITE, "last known state") .. " from when you last played that character with Auctioneer's Ledger active. This data will often appear " .. CT(DIMMED_TEXT_C, "dimmed") .. " (stale) and may include notes like \"Inside mailbox.\" or \"Being auctioned.\" based on their last saved status.\n\n");
 
     table.insert(textParts, CT(SECTION_TITLE_C, "Sorting & Filtering the Ledger") .. "\n");
@@ -1567,12 +1584,12 @@ eventHandlerFrame:RegisterEvent("PLAYER_ENTERING_WORLD");
 eventHandlerFrame:RegisterEvent("BAG_UPDATE");
 eventHandlerFrame:RegisterEvent("AUCTION_HOUSE_CLOSED");
 eventHandlerFrame:RegisterEvent("AUCTION_HOUSE_SHOW"); 
+eventHandlerFrame:RegisterEvent("OWNED_AUCTIONS_UPDATED"); 
 eventHandlerFrame:RegisterEvent("MAIL_SHOW");
 eventHandlerFrame:RegisterEvent("MAIL_INBOX_UPDATE");
 eventHandlerFrame:RegisterEvent("MAIL_CLOSED");
 eventHandlerFrame:RegisterEvent("MAIL_SEND_SUCCESS"); 
-eventHandlerFrame:RegisterEvent("GUILDBANKFRAME_OPENED"); 
-eventHandlerFrame:RegisterEvent("GUILDBANKFRAME_CLOSED"); 
+eventHandlerFrame:RegisterEvent("MERCHANT_CLOSED");
 
 eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
     if event == "ADDON_LOADED" then
@@ -1581,17 +1598,14 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         AL:HandlePlayerLogin();
     elseif event == "PLAYER_ENTERING_WORLD" then
         AL:HandlePlayerEnteringWorld();
-    elseif event=="BAG_UPDATE" or event=="AUCTION_HOUSE_CLOSED" or event=="MAIL_INBOX_UPDATE" or event=="MAIL_CLOSED" or event == "MAIL_SEND_SUCCESS" or event == "GUILDBANKFRAME_CLOSED" then 
+    elseif event=="BAG_UPDATE" or event=="AUCTION_HOUSE_CLOSED" or event=="MAIL_INBOX_UPDATE" or event=="MAIL_CLOSED" or event == "MAIL_SEND_SUCCESS" or event == "OWNED_AUCTIONS_UPDATED" or event == "MERCHANT_CLOSED" then 
         AL:TriggerDebouncedRefresh(event);
     elseif event == "AUCTION_HOUSE_SHOW" then
-        if C_AuctionHouse and type(C_AuctionHouse.GetOwnedAuctions) == "function" then -- Ensure GetOwnedAuctions is used here as RequestOwnerAuctionItems might not be the right call for just showing.
-            C_AuctionHouse.GetOwnedAuctions(); -- This call itself returns data, may not need explicit request if AH is already open and populated.
+        if C_AuctionHouse and type(C_AuctionHouse.RequestOwnerAuctionItems) == "function" then
+            C_AuctionHouse.RequestOwnerAuctionItems();
         end
         AL:TriggerDebouncedRefresh(event); 
     elseif event == "MAIL_SHOW" then
         AL:HandleMailShow(); 
-    elseif event == "GUILDBANKFRAME_OPENED" then
-         -- Guild bank logic was removed, but refresh is still triggered by the general handler.
-        AL:TriggerDebouncedRefresh(event);
     end
 end);
