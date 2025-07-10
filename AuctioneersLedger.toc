@@ -1,9 +1,9 @@
-## Interface: 110105
+## Interface: 110105, 110107
 ## Title: Auctioneer's Ledger
 ## Author: Clint Seewald (CS&A-Software)
-## Version: 1.0.23
-## Notes: Version 1.0.23
-## SavedVariables: AL_SavedData
+## Version: 1.0.60
+## Notes: Release Update: Instantly track and list items with blazing-fast sell speeds for total auction domination—intuitive, foolproof, and built for every type of player.
+## SavedVariables: AL_SavedData, AuctioneersLedgerFinances
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\inv_7xp_inscription_talenttome01
 ## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0
@@ -14,5 +14,23 @@ Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
-# Main addon code
+# Addon Files - Load order is critical
 AuctioneersLedger.lua
+Constants.lua
+Finances.lua
+Data.lua
+GUI_Utils.lua
+GUI_Elements.lua
+GUI_CoreFrames.lua
+GUI_Layout.lua
+GUI_Display.lua
+GUI_Popups.lua
+GUI_BlasterHistory.lua
+BlasterInterface.lua
+BlasterPostingLogic.lua
+BlasterEngine.lua
+BlasterAutoPricing.lua
+BlasterInventoryScan.lua
+Hooks.lua
+Core.lua
+
