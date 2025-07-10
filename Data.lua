@@ -407,8 +407,10 @@ function AL:GetItemOwnershipDetails(charData_in)
                         local mailItemLink = GetInboxItemLink(mailIndex, attachIndex)
                         if mailItemLink then
                             if self:GetItemIDFromLink(mailItemLink) == itemID then
-                                local _, _, mailItemCount = GetInboxItem(mailIndex, attachIndex)
-                                mailCountThisScan = mailCountThisScan + mailItemCount
+                                -- [[ BUG FIX: Correctly unpack the return values from GetInboxItem ]]
+                                -- The 4th return value is the item count.
+                                local _, _, _, mailItemCount = GetInboxItem(mailIndex, attachIndex)
+                                mailCountThisScan = mailCountThisScan + (mailItemCount or 0)
                             end
                         else
                             break
@@ -434,11 +436,6 @@ function AL:GetItemOwnershipDetails(charData_in)
             d.displayText = string.format("%02d", d.liveCount)
             d.isStale = true
             d.notesText = "Returning from AH"
-        elseif isCurrentCharacterItemForPersonalCheck and lastLocation == AL.LOCATION_AUCTION_HOUSE then
-            d.locationText = AL.LOCATION_AUCTION_HOUSE
-            d.displayText = string.format("%02d", charData.lastVerifiedCount)
-            d.isStale = true
-            d.notesText = "Being auctioned."
         elseif isCurrentCharacterItemForPersonalCheck and (lastLocation == AL.LOCATION_BAGS or lastLocation == AL.LOCATION_BANK or lastLocation == AL.LOCATION_REAGENT_BANK) then
             d.locationText = AL.LOCATION_LIMBO
             d.liveCount = 0

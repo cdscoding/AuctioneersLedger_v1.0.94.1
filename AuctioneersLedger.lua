@@ -11,7 +11,7 @@ AL.LDB_PREFIX = "AuctioneersLedgerDB"
 AL.ADDON_MSG_PREFIX = "AL_MSG"
 
 -- Set the addon version
-AL.VERSION = "1.0.60"
+AL.VERSION = "1.0.61"
 
 -- This is the root of the addon's database.
 _G.AL_SavedData = _G.AL_SavedData or {}

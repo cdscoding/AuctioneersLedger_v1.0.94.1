@@ -236,7 +236,7 @@ function AL:CreateSupportWindow()
     linkBox:SetPoint("TOPLEFT", authorLabel, "BOTTOMLEFT", 0, -5)
     -- Double the height of the URL box
     linkBox:SetSize(child:GetWidth() - 20, 40)
-    linkBox:SetText("https://www.paypal.com/donate?token=tTSbcsQf0WY7SJLy3U67S1ysFi8dQo37kyPmU5mtq5qHilsdfqSPTahVewGiRgKDzz4CvKMYNuqZlVFJ&locale.x=US")
+    linkBox:SetText("https://www.paypal.com/donate/?business=JJ6CDFQRR9LXN&no_recurring=0&item_name=CS%26A+Software+-+Addon+Developer+for+World+of+Warcraft&currency_code=USD")
     linkBox:SetAutoFocus(false)
     linkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
