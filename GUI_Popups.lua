@@ -193,8 +193,8 @@ function AL:CreateSupportWindow()
     local frameNameSuffix = "_v" .. AL.VERSION:gsub("%.","_")
     local sw = CreateFrame("Frame", "AL_SupportWindow" .. frameNameSuffix, UIParent, "BasicFrameTemplateWithInset")
     self.SupportWindow = sw
-    -- Shorten the window height by 200 pixels
-    sw:SetSize(AL.HELP_WINDOW_WIDTH, AL.HELP_WINDOW_HEIGHT - 200)
+    -- [[ DIRECTIVE: Changed window size to be wider and shorter ]]
+    sw:SetSize(1100, 250)
     sw:SetFrameStrata("DIALOG")
     local mainWinLevel = self.MainWindow and self.MainWindow:GetFrameLevel() or 5
     sw:SetFrameLevel(mainWinLevel + 5)
@@ -212,7 +212,7 @@ function AL:CreateSupportWindow()
     scroll:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -30, 8)
     
     local child = CreateFrame("Frame", "AL_SupportScrollChild" .. frameNameSuffix, scroll)
-    child:SetWidth(AL.HELP_WINDOW_WIDTH - 50)
+    child:SetWidth(sw:GetWidth() - 50)
     child:SetHeight(10) -- Will be resized later
     scroll:SetScrollChild(child)
 
@@ -223,7 +223,8 @@ function AL:CreateSupportWindow()
     messageFS:SetJustifyH("LEFT")
     messageFS:SetJustifyV("TOP")
     messageFS:SetTextColor(unpack(AL.COLOR_BANK_GOLD))
-    messageFS:SetText("Auctioneer's Ledger is a labor of love. I built it for anyone who wants to make gold without dealing with confusing, bloated addons, especially new players and those with disabilities who deserve to have tools they can use. I've put over 1,000 hours into this project while struggling to make rent and keep up with life. I've even had really bad wife-aggro because she didn't think it was worth my time. Late nights coding when I should have been sleeping. Weekends working instead of playing the game I love. Countless hours debugging instead of spending time with my kid. It's taken a lot out of me, but I believe in what this can do for people.\n\nIf this addon has helped you, please consider donating. It's not about getting rich, it's about keeping the lights on so I can focus on updates instead of worrying about paying my bills on time. Every dollar means I can spend more time listening to your feedback and future content development. Thanks for being here. I hope my silly little addon brings you wealth and makes the grind a little easier.")
+    -- [[ DIRECTIVE: Updated the support message text ]]
+    messageFS:SetText("Auctioneer's Ledger takes hundreds of hours of coding, debugging, and testing—late nights and countless iterations. If you enjoy the addon and want to support future updates, consider donating.")
 
     -- "Donate to Author" label
     local authorLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -243,7 +244,7 @@ function AL:CreateSupportWindow()
     linkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
     -- Instruction label for copying
-    local instructionLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    local instructionLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     instructionLabel:SetPoint("TOPLEFT", linkBox, "BOTTOMLEFT", 0, -5)
     instructionLabel:SetTextColor(1, 0.82, 0, 1) -- Yellowish color
     instructionLabel:SetText("Press Ctrl+C to copy the URL.")
@@ -258,6 +259,9 @@ function AL:CreateSupportWindow()
 
     sw:Hide()
 end
+
+
+
 
 -- Shows the support window
 function AL:ShowSupportWindow()
@@ -525,7 +529,7 @@ StaticPopupDialogs["AL_CONFIRM_TRACK_NEW_PURCHASE"] = {
 }
 
 -- NEW: Popup to recommend a reload after an Auto Pricing scan
-StaticPopupDialogs["AL_MARKET_SCAN_COMPLETE"] = {
+StaticPopupDialogs["AL_CONFIRM_RELOAD_SETTINGS"] = {
     text = "Auto Pricing scan complete. A UI reload is recommended to ensure all prices are correctly updated in the Ledger and saved permanently.",
     button1 = "Reload UI",
     button2 = "Later",
@@ -560,4 +564,37 @@ StaticPopupDialogs["AL_CONFIRM_TRACK_NEW_VENDOR_PURCHASE"] = {
     whileDead = true,
     hideOnEscape = true,
     preferredIndex = 3,
+}
+
+-- [[ FIX: Add missing StaticPopupDialogs for Nuke buttons ]]
+StaticPopupDialogs["AL_CONFIRM_NUKE_LEDGER"] = {
+    text = "Are you sure you want to |cffff0000NUKE|r your entire Ledger and Financial History? Items or sales in your mailbox will NOT be recorded if you choose to nuke your ledger and history. To register them again, you’ll need to add the items to the ledger, post them, and complete the sale. This action is |cffff0000IRREVERSIBLE|r and will delete all tracked items and sales/purchase data.",
+    button1 = "NUKE IT ALL",
+    button2 = "Cancel",
+    OnAccept = function()
+        if AL and AL.NukeLedgerAndHistory then
+            AL:NukeLedgerAndHistory()
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = true,
+}
+
+StaticPopupDialogs["AL_CONFIRM_NUKE_HISTORY"] = {
+    text = "Are you sure you want to |cffff0000NUKE|r only your Financial History (posts, sales, purchases, cancellations, auction finances, and vendor finances)? Your list of tracked items will be preserved. Items or sales in your mailbox will NOT be recorded if you choose to nuke your history. To register them again, you’ll need to add the items to the ledger, post them, and complete the sale. This action is |cffff0000IRREVERSIBLE|r.",
+    button1 = "NUKE HISTORY",
+    button2 = "Cancel",
+    OnAccept = function()
+        if AL and AL.NukeHistoryOnly then
+            AL:NukeHistoryOnly()
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+    showAlert = true,
 }

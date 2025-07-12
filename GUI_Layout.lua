@@ -99,6 +99,16 @@ function AL:UpdateLayout()
         end
     end
 
+    -- [[ NEW: Position the Nuke buttons on the top right ]]
+    if self.NukeHistoryButton then
+        self.NukeHistoryButton:SetSize(100, 22)
+        self.NukeHistoryButton:SetPoint("TOPRIGHT", self.MainWindow, "TOPRIGHT", -sideInset, tabTop)
+    end
+    if self.NukeLedgerButton then
+        self.NukeLedgerButton:SetSize(100, 22)
+        self.NukeLedgerButton:SetPoint("TOPRIGHT", self.NukeHistoryButton, "TOPLEFT", -AL.BUTTON_SPACING, 0)
+    end
+
     local contentTopY = tabTop + AL.TAB_BUTTON_HEIGHT + AL.COL_PADDING + AL.MAIN_CONTENT_VERTICAL_OFFSET_ADJUSTMENT
 
     if self.LeftPanel then

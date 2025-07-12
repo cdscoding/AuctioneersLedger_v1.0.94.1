@@ -89,15 +89,13 @@ function AL:HandlePurchaseMessage(chatFrame, message, ...)
     end
 end
 
-AL.processedMailIDs = {}
-
 function AL:BuildSalesCache()
     wipe(self.salesItemCache)
     wipe(self.salesPendingAuctionCache)
     if _G.AL_SavedData and _G.AL_SavedData.Items then
         for itemID, itemData in pairs(_G.AL_SavedData.Items) do
             if itemData and itemData.itemName then
-                self.salesItemCache[itemData.itemName] = { itemID = itemID, itemLink = itemData.itemLink }
+                self.salesItemCache[itemData.itemName] = { itemID = tonumber(itemID), itemLink = itemData.itemLink }
             end
         end
     end
@@ -105,96 +103,134 @@ function AL:BuildSalesCache()
     local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
     if pendingAuctions then
         for i, auctionData in ipairs(pendingAuctions) do
-            local success, name = pcall(GetItemInfo, auctionData.itemLink)
-            if success and name then
-                if not self.salesPendingAuctionCache[name] then
-                    self.salesPendingAuctionCache[name] = {}
+            local itemID = self:GetItemIDFromLink(auctionData.itemLink)
+            if itemID then
+                if not self.salesPendingAuctionCache[itemID] then
+                    self.salesPendingAuctionCache[itemID] = {}
                 end
-                table.insert(self.salesPendingAuctionCache[name], { originalIndex = i, data = auctionData })
+                table.insert(self.salesPendingAuctionCache[itemID], { originalIndex = i, data = auctionData })
             end
         end
     end
 end
 
 function AL:ProcessInboxForSales()
+    -- [[ BUG FIX: Call BuildSalesCache to prevent a race condition on login, ensuring caches are populated before mail is processed. ]]
+    self:BuildSalesCache()
+    AL:DebugPrint("ProcessInboxForSales: Started. Sales cache rebuilt.")
+
     local numItems = GetInboxNumItems()
+    AL:DebugPrint(string.format("  Found %d items in inbox.", numItems))
     if numItems == 0 then return end
+    
     local charKey = UnitName("player") .. "-" .. GetRealmName()
     local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
     local itemsByName = self.salesItemCache
-    local pendingByName = self.salesPendingAuctionCache
+    local pendingByID = self.salesPendingAuctionCache
     local didUpdate = false
     local indicesToRemove = {}
 
     for i = 1, numItems do
-        local _, _, sender, subject, money, _, _, _, _, _, isInvoice = GetInboxHeaderInfo(i)
-        local mailKey = sender .. subject .. tostring(money) .. tostring(i)
-        if not AL.processedMailIDs[mailKey] and isInvoice and money > 0 then
-            local invoiceType, itemName = GetInboxInvoiceInfo(i)
-            if invoiceType == "seller" and itemName then
-                local quantityFromSubject = subject and tonumber(string.match(subject, "%(x(%d+)%)"))
-                if quantityFromSubject then
-                    local itemInfo = itemsByName and itemsByName[itemName]
-                    if itemInfo then
-                        self:RecordTransaction("SELL", "AUCTION", itemInfo.itemID, money, quantityFromSubject)
-                        self:AddToHistory("sales", { itemLink = itemInfo.itemLink, itemName = itemName, quantity = quantityFromSubject, price = money, totalValue = money / 0.95, timestamp = time() })
-                        if pendingByName and pendingByName[itemName] then
-                            local quantityToClear = quantityFromSubject
-                            local pendingForThisItem = pendingByName[itemName]
-                            table.sort(pendingForThisItem, function(a, b) return a.data.postTime < b.data.postTime end)
-                            local tempCacheIndicesToRemove = {}
-                            for p_idx = #pendingForThisItem, 1, -1 do
-                                if quantityToClear > 0 then
-                                    local pendingEntry = pendingForThisItem[p_idx]
-                                    table.insert(indicesToRemove, pendingEntry.originalIndex)
-                                    table.insert(tempCacheIndicesToRemove, p_idx)
-                                    quantityToClear = quantityToClear - pendingEntry.data.quantity
-                                end
-                            end
-                            for _, p_idx_to_remove in ipairs(tempCacheIndicesToRemove) do
-                                table.remove(pendingForThisItem, p_idx_to_remove)
-                            end
-                        end
-                        AL.processedMailIDs[mailKey] = true
-                        didUpdate = true
-                    end
-                else
+        -- The 11th return value from GetInboxHeaderInfo is 'textCreated', a timestamp.
+        local _, _, sender, subject, money, _, _, _, _, _, textCreated = GetInboxHeaderInfo(i)
+        
+        -- A more reliable check for an invoice is to get the invoiceType directly.
+        local invoiceType, itemNameFromInvoice = GetInboxInvoiceInfo(i)
+
+        -- The new mailKey is stable because it no longer depends on the mail's position in the inbox.
+        -- It uses the creation timestamp and item name for uniqueness.
+        local mailKey = sender .. subject .. tostring(money) .. tostring(textCreated or 0) .. tostring(itemNameFromInvoice or "")
+        AL:DebugPrint(string.format("  [%d] Processing mailKey: %s", i, mailKey))
+        
+        if _G.AuctioneersLedgerFinances and _G.AuctioneersLedgerFinances.processedMailIDs and not _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] and invoiceType == "seller" and money > 0 then
+            AL:DebugPrint(string.format("    -> Mail is a valid, unprocessed invoice. Money: %d", money))
+            AL:DebugPrint(string.format("    -> Invoice Type: %s, Item Name: %s", tostring(invoiceType), tostring(itemNameFromInvoice)))
+
+            if itemNameFromInvoice then
+                local itemName = itemNameFromInvoice:gsub("%s+$", "")
+                
+                local itemInfo = itemsByName[itemName]
+                if itemInfo then
+                    AL:DebugPrint(string.format("    -> Found tracked item in cache: ID %d", itemInfo.itemID))
+                    local itemID = itemInfo.itemID
                     local originalValue = math.floor((money / 0.95) + 0.5)
-                    local matchedIndex = nil
-                    if pendingByName and pendingByName[itemName] then
-                        local candidates = pendingByName[itemName]
-                        local bestMatchArrayIndex, smallestDiff = nil, math.huge
+                    local matchedIndex, bestMatchArrayIndex = nil, nil
+                    local candidates = pendingByID and pendingByID[itemID]
+                    
+                    if candidates and #candidates > 0 then
+                        AL:DebugPrint(string.format("      -> Found %d pending auction candidates for this item.", #candidates))
+                        local smallestDiff = math.huge
                         for c_idx, candidate in ipairs(candidates) do
                             if candidate and candidate.data and candidate.data.totalValue then
                                 local diff = math.abs(candidate.data.totalValue - originalValue)
+                                AL:DebugPrint(string.format("        - Candidate %d: Value diff = %d", c_idx, diff))
                                 if diff < smallestDiff then
                                     smallestDiff, matchedIndex, bestMatchArrayIndex = diff, candidate.originalIndex, c_idx
                                 end
                             end
                         end
-                        if bestMatchArrayIndex then table.remove(candidates, bestMatchArrayIndex) end
+                        if smallestDiff > 1 then
+                            AL:DebugPrint("      -> Best match diff is > 1. Discarding match.")
+                            matchedIndex = nil 
+                        else
+                            AL:DebugPrint(string.format("      -> Found a pending auction match with index %d.", matchedIndex))
+                        end
                     end
+
+                    local quantity, itemLink, soldAuctionData
                     if matchedIndex then
-                        local soldAuctionData = pendingAuctions and pendingAuctions[matchedIndex]
+                        soldAuctionData = pendingAuctions and pendingAuctions[matchedIndex]
                         if soldAuctionData then
-                            local itemID = self:GetItemIDFromLink(soldAuctionData.itemLink)
-                            self:RecordTransaction("SELL", "AUCTION", itemID, money, soldAuctionData.quantity)
-                            self:AddToHistory("sales", { itemLink = soldAuctionData.itemLink, itemName = itemName, quantity = soldAuctionData.quantity, price = money, totalValue = originalValue, timestamp = time() })
-                            AL.processedMailIDs[mailKey] = true
-                            didUpdate = true
-                            table.insert(indicesToRemove, matchedIndex)
-                        end
-                    else
-                        local fallbackItem = itemsByName and itemsByName[itemName]
-                        if fallbackItem then
-                            self:RecordTransaction("SELL", "AUCTION", fallbackItem.itemID, money, 1)
-                            self:AddToHistory("sales", { itemLink = fallbackItem.itemLink, itemName = itemName, quantity = 1, price = money, totalValue = originalValue, timestamp = time() })
-                            AL.processedMailIDs[mailKey] = true
-                            didUpdate = true
+                            quantity = soldAuctionData.quantity
+                            itemLink = soldAuctionData.itemLink
+                            AL:DebugPrint(string.format("      -> Quantity from matched pending auction: %d", quantity))
                         end
                     end
+
+                    if not quantity then
+                        local qtyFromSubject = subject and tonumber(string.match(subject, "%((%d+)%)"))
+                        if qtyFromSubject then
+                            quantity = qtyFromSubject
+                            AL:DebugPrint(string.format("      -> Quantity from mail subject: %d", quantity))
+                        else
+                            quantity = 1
+                            AL:DebugPrint("      -> No quantity in subject, defaulting to 1.")
+                        end
+                    end
+                    
+                    if not itemLink then
+                        itemLink = itemInfo.itemLink
+                    end
+
+                    local depositFee = 0
+                    if matchedIndex and pendingAuctions and pendingAuctions[matchedIndex] then
+                        local matchedAuctionData = pendingAuctions[matchedIndex]
+                        if matchedAuctionData and matchedAuctionData.depositFee then
+                            depositFee = matchedAuctionData.depositFee
+                        end
+                    end
+                    AL:DebugPrint(string.format("      -> Deposit fee for this sale: %d", depositFee))
+
+                    AL:DebugPrint(string.format("    -> FINAL: Recording sale for %s (x%d).", itemName, quantity))
+                    self:RecordTransaction("SELL", "AUCTION", itemID, money, quantity)
+                    self:AddToHistory("sales", { itemLink = itemLink, itemName = itemName, quantity = quantity, price = money, depositFee = depositFee, totalValue = originalValue, timestamp = time() })
+                    
+                    _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] = true
+                    AL:DebugPrint("      -> MailKey saved to processed list.")
+                    didUpdate = true
+
+                    if matchedIndex then
+                        table.insert(indicesToRemove, matchedIndex)
+                        if bestMatchArrayIndex and candidates then
+                            table.remove(candidates, bestMatchArrayIndex)
+                        end
+                    end
+                else
+                    AL:DebugPrint(string.format("    -> Item '%s' not found in Ledger cache. Skipping.", itemName))
                 end
             end
+        else
+            AL:DebugPrint(string.format("    -> Mail skipped. Reason: Already processed or not a valid sale invoice. (Processed: %s, IsSaleInvoice: %s, Money > 0: %s)", tostring( _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] or false), tostring(invoiceType == "seller"), tostring(money > 0)))
         end
     end
 
@@ -205,12 +241,13 @@ function AL:ProcessInboxForSales()
                 table.remove(pendingAuctions, index)
             end
         end
-        self:BuildSalesCache()
     end
 
     if didUpdate and self.BlasterWindow and self.BlasterWindow:IsShown() then
+        AL:DebugPrint("  -> History updated, refreshing Blaster History panel.")
         self:RefreshBlasterHistory()
     end
+    AL:DebugPrint("ProcessInboxForSales: Finished.")
 end
 
 function AL:InitializeCoreHooks()

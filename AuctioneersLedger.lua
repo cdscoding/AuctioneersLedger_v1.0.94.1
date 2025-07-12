@@ -1,4 +1,4 @@
--- Auctioneer's Ledger - v1.0.59 - Created by Clint Seewald (CS&A-Software)
+-- Auctioneer's Ledger - v1.0.72 - Created by Clint Seewald (CS&A-Software)
 -- This file creates the main addon table and initializes all addon-wide variables.
 
 -- Create the main addon table if it doesn't exist
@@ -11,7 +11,7 @@ AL.LDB_PREFIX = "AuctioneersLedgerDB"
 AL.ADDON_MSG_PREFIX = "AL_MSG"
 
 -- Set the addon version
-AL.VERSION = "1.0.61"
+AL.VERSION = "1.0.72"
 
 -- This is the root of the addon's database.
 _G.AL_SavedData = _G.AL_SavedData or {}
@@ -19,15 +19,16 @@ _G.AL_SavedData = _G.AL_SavedData or {}
 -- [[ DIRECTIVE: All debug flags disabled for release. ]]
 AL.DEBUG_HOOKS = false
 AL.DEBUG_INVOICE_TEST = false 
+AL.DEBUG_MAIL_NO_SAVE = false -- SET TO TRUE FOR TESTING, FALSE FOR RELEASE
 
 function AL:DebugPrint(message)
-    if false then -- Master debug switch. Set to true to re-enable all prints.
+    -- [[ DEBUGGING: Master debug switch disabled for release. ]]
+    if false then 
         print("|cff00ff00[AL Debug]|r " .. tostring(message))
     end
 end
 
--- This table will cache mail details to prevent processing duplicates.
-AL.processedMailIDs = {}
+-- [[ RELEASE: Removed session-only table for testing. ]]
 
 -- Initialize all addon-wide variables to nil or their default empty state.
 -- These will be populated by the other addon files as they load.
@@ -50,8 +51,11 @@ AL.RefreshListButton = nil
 AL.HelpWindowButton = nil
 AL.ToggleMinimapButton = nil
 AL.SupportMeButton = nil
+AL.NukeLedgerButton = nil
+AL.NukeHistoryButton = nil
 AL.WarbandStockTab = nil
-AL.ProfitLossTab = nil
+AL.AuctionFinancesTab = nil
+AL.VendorFinancesTab = nil
 AL.AuctionPricingTab = nil
 AL.AuctionSettingsTab = nil
 AL.SortAlphaButton = nil
@@ -125,3 +129,60 @@ AL.auctionIDCache = {}
 -- Button collections
 AL.SortQualityButtons = {}
 AL.StackFilterButtons = {}
+
+-- [[ NEW: Nuke functions to wipe saved data ]]
+function AL:NukeLedgerAndHistory()
+    -- Wipe the main item ledger and pending auctions
+    if _G.AL_SavedData then
+        _G.AL_SavedData.Items = {}
+        _G.AL_SavedData.PendingAuctions = {}
+        -- Also clear caches that depend on this data
+        if _G.AL_SavedData.Settings and _G.AL_SavedData.Settings.itemExpansionStates then
+            _G.AL_SavedData.Settings.itemExpansionStates = {}
+        end
+    end
+
+    -- Wipe the entire financial history database
+    if _G.AuctioneersLedgerFinances then
+        _G.AuctioneersLedgerFinances.posts = {}
+        _G.AuctioneersLedgerFinances.sales = {}
+        _G.AuctioneersLedgerFinances.purchases = {}
+        _G.AuctioneersLedgerFinances.cancellations = {}
+        _G.AuctioneersLedgerFinances.processedMailIDs = {}
+    end
+    
+    -- Force a reload to clear memory and start fresh
+    ReloadUI()
+end
+
+function AL:NukeHistoryOnly()
+    -- Wipe only the financial history database used by the Blaster
+    if _G.AuctioneersLedgerFinances then
+        _G.AuctioneersLedgerFinances.posts = {}
+        _G.AuctioneersLedgerFinances.sales = {}
+        _G.AuctioneersLedgerFinances.purchases = {}
+        _G.AuctioneersLedgerFinances.cancellations = {}
+        _G.AuctioneersLedgerFinances.processedMailIDs = {}
+    end
+
+    -- [[ FIX: Also wipe the aggregated financial data from the main ledger ]]
+    if _G.AL_SavedData and _G.AL_SavedData.Items then
+        for itemID, itemData in pairs(_G.AL_SavedData.Items) do
+            if itemData and itemData.characters then
+                for charKey, charData in pairs(itemData.characters) do
+                    charData.totalAuctionBoughtQty = 0
+                    charData.totalAuctionSoldQty = 0
+                    charData.totalAuctionProfit = 0
+                    charData.totalAuctionLoss = 0
+                    charData.totalVendorBoughtQty = 0
+                    charData.totalVendorSoldQty = 0
+                    charData.totalVendorProfit = 0
+                    charData.totalVendorLoss = 0
+                end
+            end
+        end
+    end
+
+    -- Force a reload to clear memory and start fresh
+    ReloadUI()
+end

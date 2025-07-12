@@ -35,24 +35,18 @@ function AL:CreateHistoryRow(parent, yOffset, data, isEven, historyType)
         row:SetScript("OnEnter", function(s) GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:SetHyperlink(effectiveItemLink); GameTooltip:Show() end)
         row:SetScript("OnLeave", function(s) GameTooltip:Hide() end)
     else
-        -- [[ BEGIN ROBUST FALLBACK ]]
-        -- This handles the "corrupted" data case where both itemLink and itemName are nil.
-        -- It prevents the UI from crashing and displays a clear message to the user.
         icon:SetTexture("Interface\\Icons\\inv_misc_questionmark")
-        local r, g, b = GetItemQualityColor(0) -- Grey color for invalid data
-        local displayName = data.itemName or "Invalid Item Data" -- Use a fallback name to prevent nil
+        local r, g, b = GetItemQualityColor(0) 
+        local displayName = data.itemName or "Invalid Item Data" 
         nameFS:SetText(string.format("|cff%02x%02x%02x%s|r", r*255, g*255, b*255, displayName))
         
-        -- Only set a tooltip if we have a valid name to show.
         if data.itemName then
             row:SetScript("OnEnter", function(s) GameTooltip:SetOwner(s, "ANCHOR_RIGHT"); GameTooltip:SetText(data.itemName, r, g, b); GameTooltip:Show() end)
             row:SetScript("OnLeave", function(s) GameTooltip:Hide() end)
         else
-            -- If no name, disable the tooltip entirely for this row to prevent errors.
             row:SetScript("OnEnter", nil)
             row:SetScript("OnLeave", nil)
         end
-        -- [[ END ROBUST FALLBACK ]]
     end
 
     -- Column 2: Quantity
@@ -76,7 +70,8 @@ function AL:CreateHistoryRow(parent, yOffset, data, isEven, historyType)
         priceFS:SetText(string.format("|cff33ff33%s|r / |cffff3333%s|r", self:FormatGoldAndSilverRoundedUp(data.totalValue or 0), self:FormatGoldAndSilverRoundedUp(data.price or 0)))
     elseif historyType == "sales" then
         priceFS:SetTextColor(unpack(AL.COLOR_PROFIT))
-        priceFS:SetText(self:FormatGoldAndSilverRoundedUp(data.price or 0))
+        local totalRefund = (data.price or 0) + (data.depositFee or 0)
+        priceFS:SetText(self:FormatGoldAndSilverRoundedUp(totalRefund))
     elseif historyType == "purchases" then
         priceFS:SetTextColor(unpack(AL.COLOR_LOSS))
         priceFS:SetText(self:FormatGoldAndSilverRoundedUp(data.pricePerItem or 0))
@@ -140,7 +135,6 @@ function AL:CreateBlasterHistoryFrames(parent)
     historyContainer:SetWidth(AL.BLASTER_HISTORY_PANEL_WIDTH)
     parent.HistoryContainer = historyContainer
 
-    -- [[ DIRECTIVE START: Rewriting tab creation to use simple Buttons, replicating the working main tab logic. ]]
     local tabs = {
         {name="Posts", type="posts"}, {name="Sales", type="sales"},
         {name="Purchases", type="purchases"}, {name="Cancellations", type="cancellations"}
@@ -148,7 +142,6 @@ function AL:CreateBlasterHistoryFrames(parent)
     local lastTab
     local firstTab
     for i, tabInfo in ipairs(tabs) do
-        -- Create as a standard Button using the correct template.
         local tab = CreateFrame("Button", "AL_BlasterHistory"..tabInfo.name.."Tab", historyContainer, "UIPanelButtonTemplate")
         tab:SetSize(AL.BLASTER_HISTORY_TAB_WIDTH, AL.BLASTER_HISTORY_TAB_HEIGHT)
         tab:SetText(tabInfo.name)
@@ -165,7 +158,6 @@ function AL:CreateBlasterHistoryFrames(parent)
         parent["History"..tabInfo.name.."Tab"] = tab
         lastTab = tab
     end
-    -- [[ DIRECTIVE END ]]
 
     local displayBackdrop = CreateFrame("Frame", "AL_BlasterHistoryDisplayBackdrop", historyContainer, "BackdropTemplate")
     if firstTab then
@@ -224,7 +216,6 @@ function AL:ShowBlasterHistoryPanel(blasterFrame, panelType)
     local panels = {blasterFrame.HistoryPostsPanel, blasterFrame.HistorySalesPanel, blasterFrame.HistoryPurchasePanel, blasterFrame.HistoryCancelPanel}
     for _, p in ipairs(panels) do if p then p:Hide() end end
 
-    -- [[ DIRECTIVE START: Final logic using simple texture and color swaps, replicating main UI tab behavior. ]]
     local tabs = {
         {frame=blasterFrame.HistoryPostsTab, type="posts"}, {frame=blasterFrame.HistorySalesTab, type="sales"},
         {frame=blasterFrame.HistoryPurchasesTab, type="purchases"}, {frame=blasterFrame.HistoryCancellationsTab, type="cancellations"}
@@ -241,10 +232,10 @@ function AL:ShowBlasterHistoryPanel(blasterFrame, panelType)
             end
         end
     end
-    -- [[ DIRECTIVE END ]]
-
-    if panelType == "posts" then blasterFrame.HistoryPostsPanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Value / Fee")
-    elseif panelType == "sales" then blasterFrame.HistorySalesPanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Net Sale")
+    
+    -- [[ DIRECTIVE: Update column headers for clarity ]]
+    if panelType == "posts" then blasterFrame.HistoryPostsPanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Value / Deposit Fee")
+    elseif panelType == "sales" then blasterFrame.HistorySalesPanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Net Sale + Fee Refund")
     elseif panelType == "purchases" then blasterFrame.HistoryPurchasePanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Price Per")
     elseif panelType == "cancellations" then blasterFrame.HistoryCancelPanel:Show(); blasterFrame.HistoryHeader.PriceHFS:SetText("Lost Deposit")
     end

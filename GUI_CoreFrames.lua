@@ -13,6 +13,8 @@ function AL:CreateFrames()
         -- Full reset of frame variables
         self.MainWindow,self.LeftPanel,self.CreateReminderButton,self.RefreshListButton,self.HelpWindowButton,self.ToggleMinimapButton,self.SupportMeButton,self.ColumnHeaderFrame,self.ScrollFrame,self.ScrollChild,self.ReminderPopup=nil,nil,nil,nil,nil,nil,nil,nil,nil,nil,nil
         self.WarbandStockTab, self.AuctionFinancesTab, self.VendorFinancesTab, self.AuctionPricingTab, self.AuctionSettingsTab = nil, nil, nil, nil, nil
+        -- [[ ADDED Nuke buttons to reset list ]]
+        self.NukeLedgerButton, self.NukeHistoryButton = nil, nil
         self.SortAlphaButton, self.SortItemNameFlatButton, self.SortBagsButton, self.SortBankButton, self.SortMailButton, self.SortAuctionButton, self.SortLimboButton, self.SortWarbandBankButton, self.SortReagentBankButton = nil,nil,nil,nil,nil,nil,nil,nil,nil,nil
         self.SortCharacterButton, self.SortRealmButton = nil, nil
         self.LabelSortBy, self.LabelFilterLocation, self.LabelFilterQuality, self.LabelFilterLedger, self.LabelFilterStackability = nil, nil, nil, nil, nil
@@ -46,6 +48,15 @@ function AL:CreateFrames()
     self.VendorFinancesTab = AL.createTabButton(f, "VendorFinances", "Vendor Finances", AL.VIEW_VENDOR_FINANCES, frameNameSuffix)
     self.AuctionPricingTab = AL.createTabButton(f, "AuctionPricing", "Auction Pricing", AL.VIEW_AUCTION_PRICING, frameNameSuffix)
     self.AuctionSettingsTab = AL.createTabButton(f, "AuctionSettings", "Auction Settings", AL.VIEW_AUCTION_SETTINGS, frameNameSuffix)
+
+    -- [[ NEW: Create the Nuke buttons ]]
+    self.NukeLedgerButton = CreateFrame("Button", "AL_NukeLedgerButton" .. frameNameSuffix, f, "UIPanelButtonTemplate")
+    self.NukeLedgerButton:SetText("Nuke Ledger")
+    self.NukeLedgerButton:SetScript("OnClick", function() StaticPopup_Show("AL_CONFIRM_NUKE_LEDGER") end)
+    
+    self.NukeHistoryButton = CreateFrame("Button", "AL_NukeHistoryButton" .. frameNameSuffix, f, "UIPanelButtonTemplate")
+    self.NukeHistoryButton:SetText("Nuke History")
+    self.NukeHistoryButton:SetScript("OnClick", function() StaticPopup_Show("AL_CONFIRM_NUKE_HISTORY") end)
 
     local lp=CreateFrame("Frame","AL_LeftPanel" .. frameNameSuffix,self.MainWindow)
     self.LeftPanel=lp
