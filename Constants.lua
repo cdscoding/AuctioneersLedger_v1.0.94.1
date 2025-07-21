@@ -1,6 +1,6 @@
 -- Auctioneer's Ledger - Constants
 -- This file contains all the static configuration values for the addon.
-AL.VERSION = "1.0.72" 
+AL.VERSION = "1.0.86" 
 
 -- Core numerical constants (independent)
 AL.COL_PADDING = 5
@@ -31,7 +31,8 @@ AL.HELP_WINDOW_HEIGHT = 600
 
 -- Blaster Constants
 AL.BLASTER_WINDOW_WIDTH = 360
-AL.BLASTER_WINDOW_HEIGHT = 500
+-- [[ DIRECTIVE: Increased height to prevent UI bounce ]]
+AL.BLASTER_WINDOW_HEIGHT = 550
 AL.BLASTER_BUTTON_WIDTH = 140
 AL.BLASTER_LOGO_PATH = "Interface\\AddOns\\AuctioneersLedger\\Media\\BlasterLogo.tga"
 AL.BLASTER_FAIL_ICON_PATH = "Interface\\Buttons\\UI-GroupLoot-Pass-Down"
@@ -52,6 +53,9 @@ AL.BH_COL_ICON_AND_NAME_WIDTH = 200
 AL.BH_COL_QTY_WIDTH = 50
 AL.BH_COL_PRICE_WIDTH = 120
 AL.BH_COL_DATE_WIDTH = 60
+
+-- [[ NEW: Patreon Logo Constants ]]
+AL.PATREON_LOGO_PATH = "Interface\\AddOns\\AuctioneersLedger\\Media\\PatreonLogo.tga"
 
 -- Popup Constants
 AL.POPUP_FEEDBACK_DURATION = 3.0

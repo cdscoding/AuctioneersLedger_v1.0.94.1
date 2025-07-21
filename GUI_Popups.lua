@@ -193,12 +193,12 @@ function AL:CreateSupportWindow()
     local frameNameSuffix = "_v" .. AL.VERSION:gsub("%.","_")
     local sw = CreateFrame("Frame", "AL_SupportWindow" .. frameNameSuffix, UIParent, "BasicFrameTemplateWithInset")
     self.SupportWindow = sw
-    -- [[ DIRECTIVE: Changed window size to be wider and shorter ]]
-    sw:SetSize(1100, 250)
+    sw:SetSize(420, 320) -- Resized for new content
     sw:SetFrameStrata("DIALOG")
     local mainWinLevel = self.MainWindow and self.MainWindow:GetFrameLevel() or 5
     sw:SetFrameLevel(mainWinLevel + 5)
-    sw.TitleText:SetText("Support " .. AL.ADDON_NAME)
+    -- [[ DIRECTIVE: Change Title to Patreon ]]
+    sw.TitleText:SetText("Support on Patreon")
     sw:SetMovable(true)
     sw:RegisterForDrag("LeftButton")
     sw:SetScript("OnDragStart", function(self) self:StartMoving() end)
@@ -206,62 +206,41 @@ function AL:CreateSupportWindow()
     sw:SetClampedToScreen(true)
     sw.CloseButton:SetScript("OnClick", function() self:HideSupportWindow() end)
 
-    -- ScrollFrame to contain all the text and elements
-    local scroll = CreateFrame("ScrollFrame", "AL_SupportScrollFrame" .. frameNameSuffix, sw, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", sw, "TOPLEFT", 8, -30)
-    scroll:SetPoint("BOTTOMRIGHT", sw, "BOTTOMRIGHT", -30, 8)
-    
-    local child = CreateFrame("Frame", "AL_SupportScrollChild" .. frameNameSuffix, scroll)
-    child:SetWidth(sw:GetWidth() - 50)
-    child:SetHeight(10) -- Will be resized later
-    scroll:SetScrollChild(child)
+    -- [[ DIRECTIVE: Add Patreon Logo ]]
+    local logo = sw:CreateTexture(nil, "ARTWORK")
+    logo:SetSize(256, 64) -- Estimated size
+    logo:SetTexture(AL.PATREON_LOGO_PATH)
+    logo:SetPoint("TOP", sw, "TOP", 0, -40)
 
     -- Main message FontString
-    local messageFS = child:CreateFontString("AL_SupportMessageFS" .. frameNameSuffix, "ARTWORK", "GameFontNormalLarge")
-    messageFS:SetPoint("TOPLEFT", child, "TOPLEFT", 10, -10)
-    messageFS:SetWidth(child:GetWidth() - 20)
-    messageFS:SetJustifyH("LEFT")
+    local messageFS = sw:CreateFontString("AL_SupportMessageFS" .. frameNameSuffix, "ARTWORK", "GameFontNormal")
+    messageFS:SetPoint("TOP", logo, "BOTTOM", 0, -15)
+    messageFS:SetWidth(sw:GetWidth() - 40)
+    messageFS:SetJustifyH("CENTER")
     messageFS:SetJustifyV("TOP")
     messageFS:SetTextColor(unpack(AL.COLOR_BANK_GOLD))
     -- [[ DIRECTIVE: Updated the support message text ]]
-    messageFS:SetText("Auctioneer's Ledger takes hundreds of hours of coding, debugging, and testing—late nights and countless iterations. If you enjoy the addon and want to support future updates, consider donating.")
-
-    -- "Donate to Author" label
-    local authorLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    authorLabel:SetPoint("TOPLEFT", messageFS, "BOTTOMLEFT", 0, -20)
-    authorLabel:SetTextColor(1, 1, 1, 1) -- White color
-    authorLabel:SetText("Donate to Author: Clint Seewald (CS&A Software)")
+    messageFS:SetText("Auctioneer's Ledger is a passion project that takes hundreds of hours to develop and maintain. If you find the addon valuable and want to support its continued development, please consider becoming a patron!")
 
     -- Donation link EditBox
-    local linkBox = CreateFrame("EditBox", "AL_SupportLinkBox" .. frameNameSuffix, child, "InputBoxTemplate")
-    linkBox:SetPoint("TOPLEFT", authorLabel, "BOTTOMLEFT", 0, -5)
-    -- Double the height of the URL box
-    linkBox:SetSize(child:GetWidth() - 20, 40)
-    linkBox:SetText("https://www.paypal.com/donate/?business=JJ6CDFQRR9LXN&no_recurring=0&item_name=CS%26A+Software+-+Addon+Developer+for+World+of+Warcraft&currency_code=USD")
+    local linkBox = CreateFrame("EditBox", "AL_SupportLinkBox" .. frameNameSuffix, sw, "InputBoxTemplate")
+    linkBox:SetPoint("TOP", messageFS, "BOTTOM", 0, -15)
+    linkBox:SetSize(sw:GetWidth() - 60, 30)
+    -- [[ DIRECTIVE: Update URL to Patreon ]]
+    linkBox:SetText("https://www.patreon.com/csasoftware")
     linkBox:SetAutoFocus(false)
     linkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     linkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
     -- Instruction label for copying
-    local instructionLabel = child:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    instructionLabel:SetPoint("TOPLEFT", linkBox, "BOTTOMLEFT", 0, -5)
+    local instructionLabel = sw:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    instructionLabel:SetPoint("TOP", linkBox, "BOTTOM", 0, -5)
     instructionLabel:SetTextColor(1, 0.82, 0, 1) -- Yellowish color
     instructionLabel:SetText("Press Ctrl+C to copy the URL.")
 
-    -- Dynamically set the height of the scroll child based on content
-    C_Timer.After(0.05, function()
-        if child and instructionLabel and child:IsVisible() then
-            local totalHeight = -instructionLabel:GetTop() + instructionLabel:GetHeight() + 20
-            child:SetHeight(math.max(scroll:GetHeight(), totalHeight))
-        end
-    end)
-
     sw:Hide()
 end
-
-
-
 
 -- Shows the support window
 function AL:ShowSupportWindow()
@@ -529,7 +508,7 @@ StaticPopupDialogs["AL_CONFIRM_TRACK_NEW_PURCHASE"] = {
 }
 
 -- NEW: Popup to recommend a reload after an Auto Pricing scan
-StaticPopupDialogs["AL_CONFIRM_RELOAD_SETTINGS"] = {
+StaticPopupDialogs["AL_MARKET_SCAN_COMPLETE"] = {
     text = "Auto Pricing scan complete. A UI reload is recommended to ensure all prices are correctly updated in the Ledger and saved permanently.",
     button1 = "Reload UI",
     button2 = "Later",
@@ -597,4 +576,20 @@ StaticPopupDialogs["AL_CONFIRM_NUKE_HISTORY"] = {
     hideOnEscape = true,
     preferredIndex = 3,
     showAlert = true,
+}
+
+-- [[ NEW: Popups for Cancel Undercut feature ]]
+StaticPopupDialogs["AL_CONFIRM_CANCEL_UNDERCUT"] = {
+    text = "Do you want to scan all of your current auctions to find items that have been undercut? This may take a moment.",
+    button1 = "Yes, Scan Auctions",
+    button2 = NO,
+    OnAccept = function()
+        if AL and AL.StartCancelScan then
+            AL:StartCancelScan()
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
 }

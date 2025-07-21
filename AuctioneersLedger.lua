@@ -1,4 +1,4 @@
--- Auctioneer's Ledger - v1.0.72 - Created by Clint Seewald (CS&A-Software)
+-- Auctioneer's Ledger - v1.0.86 - Created by Clint Seewald (CS&A-Software)
 -- This file creates the main addon table and initializes all addon-wide variables.
 
 -- Create the main addon table if it doesn't exist
@@ -11,7 +11,7 @@ AL.LDB_PREFIX = "AuctioneersLedgerDB"
 AL.ADDON_MSG_PREFIX = "AL_MSG"
 
 -- Set the addon version
-AL.VERSION = "1.0.72"
+AL.VERSION = "1.0.86"
 
 -- This is the root of the addon's database.
 _G.AL_SavedData = _G.AL_SavedData or {}
@@ -22,8 +22,8 @@ AL.DEBUG_INVOICE_TEST = false
 AL.DEBUG_MAIL_NO_SAVE = false -- SET TO TRUE FOR TESTING, FALSE FOR RELEASE
 
 function AL:DebugPrint(message)
-    -- [[ DEBUGGING: Master debug switch disabled for release. ]]
-    if false then 
+    -- [[ DEBUGGING: Master debug switch enabled for this session. ]]
+    if true then 
         print("|cff00ff00[AL Debug]|r " .. tostring(message))
     end
 end

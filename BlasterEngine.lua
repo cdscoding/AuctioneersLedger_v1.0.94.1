@@ -25,37 +25,33 @@ function AL:BlasterEventHandler(event, ...)
     self:DebugPrint(string.format("|cff999999BlasterEventHandler Fired: %s|r", event))
 
     if event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
-        if self.isScanning and self.itemBeingScanned then
-            self:DebugPrint(string.format("  - Handler is active for item: |cffffff00%s|r", tostring(self.itemBeingScanned.itemName)))
-
-            local itemKeyFromEvent
-            if event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
-                itemKeyFromEvent = { itemID = select(1, ...) }
-            else
-                itemKeyFromEvent = select(1, ...)
-            end
-
-            if not itemKeyFromEvent then
-                self:DebugPrint("  - |cffff0000ERROR: itemKeyFromEvent is nil!|r")
-                return
-            end
-
-            self:DebugPrint(string.format("  - My Scanned Item ID: |cff00ffff%d|r", self.itemBeingScanned.itemID))
-            self:DebugPrint(string.format("  - Event ItemKey ID: |cff00ffff%s|r", tostring(itemKeyFromEvent.itemID)))
-
-            if itemKeyFromEvent and itemKeyFromEvent.itemID and self.itemBeingScanned.itemID == itemKeyFromEvent.itemID then
-                self:DebugPrint("  - |cff00ff00Item key match SUCCESS! Processing results...|r")
-                -- NOTE: This will call whichever ProcessScanResult function is active in your file
-                if self.isMarketScan then
-                    self:ProcessMarketScanResult(self.itemBeingScanned, itemKeyFromEvent, event)
-                else
-                    self:ProcessScanResult(self.itemBeingScanned, itemKeyFromEvent, event)
-                end
-                self.itemBeingScanned = nil
-            else
-                self:DebugPrint("  - |cffff0000Item key match FAILED! Ignoring results.|r")
-            end
+        local itemKeyFromEvent
+        if event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
+            itemKeyFromEvent = { itemID = select(1, ...) }
+        else
+            itemKeyFromEvent = select(1, ...)
         end
+
+        if not itemKeyFromEvent then
+            self:DebugPrint("  - |cffff0000ERROR: itemKeyFromEvent is nil!|r")
+            return
+        end
+
+        if self.isScanning and self.itemBeingScanned and itemKeyFromEvent.itemID == self.itemBeingScanned.itemID then
+            self:DebugPrint("  - |cff00ff00Item key match SUCCESS for Blaster Scan! Processing results...|r")
+            if self.isMarketScan then
+                self:ProcessMarketScanResult(self.itemBeingScanned, itemKeyFromEvent, event)
+            else
+                self:ProcessScanResult(self.itemBeingScanned, itemKeyFromEvent, event)
+            end
+            self.itemBeingScanned = nil
+        elseif self.isCancelScanning and self.itemBeingCancelScanned and itemKeyFromEvent.itemID == self.itemBeingCancelScanned.itemKey.itemID then
+            self:DebugPrint("  - |cff00ff00Item key match SUCCESS for Cancel Scan! Processing results...|r")
+            self:ProcessCancelScanResults(itemKeyFromEvent, event)
+        else
+            self:DebugPrint("  - |cffff0000Item key match FAILED! Ignoring results.|r")
+        end
+
     elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
         if self.isPosting and self.itemBeingPosted then
             self:HandlePostSuccess()

@@ -21,6 +21,7 @@ function AL:EnableBlasterButtons()
         AL.BlasterWindow.SkipButton:Disable()
         AL.BlasterWindow.ReloadButton:Enable()
         AL.BlasterWindow.AutoPricingButton:Enable()
+        AL.BlasterWindow.CancelUndercutButton:Enable()
     end
 end
 
@@ -29,10 +30,24 @@ function AL:RefreshBlasterQueue()
     if self.postFailureTimer then self.postFailureTimer:Cancel(); self.postFailureTimer = nil end
     AL.savedAuctionHouseState = nil
     self:ResetBlasterState()
+    
+    -- [[ FIX: Explicitly reset cancel-scan state on refresh ]]
+    -- This ensures that clicking "Refresh" provides a completely clean slate for all
+    -- Blaster operations, including any pending cancellation actions.
+    self.isCancelScanning = false
+    self.isCancelling = false
+    self.auctionsToCancel = {}
+    -- [[ END FIX ]]
+
     self.blasterQueue = {}
     self:RenderBlasterQueueUI()
     AL:EnableBlasterButtons()
     AL:SetBlasterStatus("Queue cleared. Ready to scan.")
+    
+    if AL.BlasterWindow then
+        if AL.BlasterWindow.CancelUndercutButton then AL.BlasterWindow.CancelUndercutButton:Show() end
+        if AL.BlasterWindow.CancelNextButton then AL.BlasterWindow.CancelNextButton:Hide() end
+    end
 end
 
 function AL:HideBlasterWindow()
@@ -222,7 +237,7 @@ function AL:CreatePriceEntryPopup()
     p:SetFrameStrata("HIGH")
     p:SetFrameLevel(20)
     p:SetMovable(true)
-    p:EnableMouse(true) -- [[ FIX: Enable mouse input for the frame ]]
+    p:EnableMouse(true) 
     p:RegisterForDrag("LeftButton")
     p:SetScript("OnDragStart", function(self) self:StartMoving() end)
     p:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
@@ -260,7 +275,6 @@ function AL:CreatePriceEntryPopup()
     p:Hide()
 end
 
--- [[ NEW: Create Undermine Exchange Popup ]]
 function AL:CreateUnderminePopup()
     if self.UnderminePopup then return end
     local p = CreateFrame("Frame", "AL_UnderminePopup", UIParent, "BasicFrameTemplateWithInset")
@@ -299,7 +313,6 @@ function AL:CreateUnderminePopup()
     p:Hide()
 end
 
--- [[ NEW: Show Undermine Exchange Popup ]]
 function AL:ShowUnderminePopup()
     if not self.UnderminePopup then self:CreateUnderminePopup() end
     local p = self.UnderminePopup
@@ -364,19 +377,32 @@ function AL:CreateBlasterWindow()
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton"); f:SetScript("OnDragStart", function(self) self:StartMoving() end); f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     local logo = f:CreateTexture(nil, "ARTWORK"); logo:SetSize(AL.BLASTER_LOGO_WIDTH, AL.BLASTER_LOGO_HEIGHT); logo:SetTexture(AL.BLASTER_LOGO_PATH); logo:SetPoint("TOP", f, "TOP", 0, -30)
     local statusText = f:CreateFontString(nil, "ARTWORK", "GameFontNormal"); statusText:SetPoint("TOP", logo, "BOTTOM", 0, -10); statusText:SetJustifyH("CENTER"); statusText:SetWidth(f:GetWidth() - 40); f.StatusText = statusText
+    
+    local lowerContent = CreateFrame("Frame", nil, f)
+    lowerContent:SetPoint("TOP", logo, "BOTTOM", 0, -40) 
+    lowerContent:SetPoint("LEFT", f, "LEFT")
+    lowerContent:SetPoint("RIGHT", f, "RIGHT")
+    lowerContent:SetPoint("BOTTOM", f, "BOTTOM")
+
     local queueWidth = AL.BLASTER_LOGO_WIDTH / 1.85; local queueHeight = AL.BLASTER_LOGO_HEIGHT / 1.2
-    local queueBackdrop = CreateFrame("Frame", nil, f, "BackdropTemplate"); queueBackdrop:SetSize(queueWidth, queueHeight); queueBackdrop:SetPoint("TOPLEFT", statusText, "BOTTOMLEFT", -10, -20)
+    local queueBackdrop = CreateFrame("Frame", nil, lowerContent, "BackdropTemplate"); 
+    queueBackdrop:SetSize(queueWidth, queueHeight); 
+    
+    queueBackdrop:SetPoint("TOPLEFT", lowerContent, "TOPLEFT", 13, -60)
+    
     queueBackdrop:SetBackdrop({ bgFile = "Interface/DialogFrame/UI-DialogBox-Background-Dark", edgeFile = "Interface/Tooltips/UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } }); queueBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.9); queueBackdrop:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
     
     local queueScroll = CreateFrame("ScrollFrame", "AL_BlasterQueueScrollFrame", queueBackdrop, "UIPanelScrollFrameTemplate"); queueScroll:SetPoint("TOPLEFT", 8, -8); queueScroll:SetPoint("BOTTOMRIGHT", -8, 8)
     local queueScrollChild = CreateFrame("Frame", "AL_BlasterQueueScrollChild", queueScroll); queueScrollChild:SetWidth(queueScroll:GetWidth()); queueScroll:SetScrollChild(queueScrollChild); f.QueueScrollChild = queueScrollChild; f.QueueItemButtons = {}
-    local buttonPanel = CreateFrame("Frame", nil, f); buttonPanel:SetSize(180, queueHeight); buttonPanel:SetPoint("LEFT", queueBackdrop, "RIGHT", 10, 0)
+    local buttonPanel = CreateFrame("Frame", nil, lowerContent); buttonPanel:SetSize(180, queueHeight); buttonPanel:SetPoint("LEFT", queueBackdrop, "RIGHT", 10, 0)
     
     local scanButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.ScanButton = scanButton
     local blastButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.BlastButton = blastButton
     local skipButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.SkipButton = skipButton
     local reloadButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.ReloadButton = reloadButton
     local autoPricingButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.AutoPricingButton = autoPricingButton
+    local cancelUndercutButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.CancelUndercutButton = cancelUndercutButton
+    local cancelNextButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.CancelNextButton = cancelNextButton
     local undermineButton = CreateFrame("Button", nil, buttonPanel, "UIPanelButtonTemplate"); f.UndermineButton = undermineButton
 
     scanButton:SetText("Scan Inventory"); scanButton:SetScript("OnClick", function() AL:StartScan() end)
@@ -384,11 +410,11 @@ function AL:CreateBlasterWindow()
     skipButton:SetText("Skip"); skipButton:Disable(); skipButton:SetScript("OnClick", function() self:SkipQueueItem() end)
     reloadButton:SetText("Refresh"); reloadButton:SetScript("OnClick", function() self:RefreshBlasterQueue() end)
     autoPricingButton:SetText("Auto Pricing"); autoPricingButton:SetScript("OnClick", function() self:StartMarketPriceScan() end)
-    undermineButton:SetText("Undermine Exchange")
-    -- [[ DIRECTIVE: Change OnClick to call the new popup function ]]
-    undermineButton:SetScript("OnClick", function() AL:ShowUnderminePopup() end)
+    cancelUndercutButton:SetText("Cancel Undercut"); cancelUndercutButton:SetScript("OnClick", function() AL:StartCancelScan() end)
+    cancelNextButton:SetText("Cancel Next (0)"); cancelNextButton:SetScript("OnClick", function() AL:CancelSingleUndercutAuction() end); cancelNextButton:Hide(); cancelNextButton:Disable()
+    undermineButton:SetText("Undermine Exchange"); undermineButton:SetScript("OnClick", function() AL:ShowUnderminePopup() end)
     
-    local buttons = {scanButton, blastButton, skipButton, reloadButton, autoPricingButton, undermineButton}
+    local buttons = {scanButton, blastButton, skipButton, reloadButton, autoPricingButton, cancelUndercutButton, undermineButton}
     local buttonHeight = 28
     local buttonSpacing = 2
     local numButtons = #buttons
@@ -404,6 +430,8 @@ function AL:CreateBlasterWindow()
             button:SetPoint("TOP", buttons[i-1], "BOTTOM", 0, -buttonSpacing)
         end
     end
+
+    cancelNextButton:SetAllPoints(cancelUndercutButton)
 
     self:AttachBlasterHistory(f)
 end

@@ -1,7 +1,7 @@
 ## Interface: 110107
 ## Title: Auctioneer's Ledger
 ## Author: Clint Seewald (CS&A-Software)
-## Version: 1.0.72
+## Version: 1.0.86
 ## Notes: Release Update: Instantly track and list items with blazing-fast sell speeds for total auction domination—intuitive, foolproof, and built for every type of player.
 ## SavedVariables: AL_SavedData, AuctioneersLedgerFinances
 ## DefaultState: enabled
@@ -32,5 +32,7 @@ BlasterEngine.lua
 GUI_BlasterHistory.lua
 BlasterInterface.lua
 Hooks.lua
+CancelAuctions.lua
 Core.lua
+
 
