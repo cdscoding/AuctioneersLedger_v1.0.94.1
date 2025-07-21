@@ -34,11 +34,6 @@ function AL:FinalizeAndPrintPurchase(itemName, quantity, moneySpent, purchaseDat
         end
     end
 
-    if not foundLink then
-        -- This can be kept as a non-intrusive debug message for edge cases.
-        AL:DebugPrint("Item '" .. itemName .. "' not found in tooltip cache. Recording by name only.")
-    end
-
     AL:ProcessPurchase(itemName, foundLink, quantity, moneySpent)
 
     if foundLink then
@@ -115,12 +110,9 @@ function AL:BuildSalesCache()
 end
 
 function AL:ProcessInboxForSales()
-    -- [[ BUG FIX: Call BuildSalesCache to prevent a race condition on login, ensuring caches are populated before mail is processed. ]]
     self:BuildSalesCache()
-    AL:DebugPrint("ProcessInboxForSales: Started. Sales cache rebuilt.")
 
     local numItems = GetInboxNumItems()
-    AL:DebugPrint(string.format("  Found %d items in inbox.", numItems))
     if numItems == 0 then return end
     
     local charKey = UnitName("player") .. "-" .. GetRealmName()
@@ -131,49 +123,33 @@ function AL:ProcessInboxForSales()
     local indicesToRemove = {}
 
     for i = 1, numItems do
-        -- The 11th return value from GetInboxHeaderInfo is 'textCreated', a timestamp.
         local _, _, sender, subject, money, _, _, _, _, _, textCreated = GetInboxHeaderInfo(i)
-        
-        -- A more reliable check for an invoice is to get the invoiceType directly.
         local invoiceType, itemNameFromInvoice = GetInboxInvoiceInfo(i)
-
-        -- The new mailKey is stable because it no longer depends on the mail's position in the inbox.
-        -- It uses the creation timestamp and item name for uniqueness.
         local mailKey = sender .. subject .. tostring(money) .. tostring(textCreated or 0) .. tostring(itemNameFromInvoice or "")
-        AL:DebugPrint(string.format("  [%d] Processing mailKey: %s", i, mailKey))
         
         if _G.AuctioneersLedgerFinances and _G.AuctioneersLedgerFinances.processedMailIDs and not _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] and invoiceType == "seller" and money > 0 then
-            AL:DebugPrint(string.format("    -> Mail is a valid, unprocessed invoice. Money: %d", money))
-            AL:DebugPrint(string.format("    -> Invoice Type: %s, Item Name: %s", tostring(invoiceType), tostring(itemNameFromInvoice)))
-
             if itemNameFromInvoice then
                 local itemName = itemNameFromInvoice:gsub("%s+$", "")
                 
                 local itemInfo = itemsByName[itemName]
                 if itemInfo then
-                    AL:DebugPrint(string.format("    -> Found tracked item in cache: ID %d", itemInfo.itemID))
                     local itemID = itemInfo.itemID
                     local originalValue = math.floor((money / 0.95) + 0.5)
                     local matchedIndex, bestMatchArrayIndex = nil, nil
                     local candidates = pendingByID and pendingByID[itemID]
                     
                     if candidates and #candidates > 0 then
-                        AL:DebugPrint(string.format("      -> Found %d pending auction candidates for this item.", #candidates))
                         local smallestDiff = math.huge
                         for c_idx, candidate in ipairs(candidates) do
                             if candidate and candidate.data and candidate.data.totalValue then
                                 local diff = math.abs(candidate.data.totalValue - originalValue)
-                                AL:DebugPrint(string.format("        - Candidate %d: Value diff = %d", c_idx, diff))
                                 if diff < smallestDiff then
                                     smallestDiff, matchedIndex, bestMatchArrayIndex = diff, candidate.originalIndex, c_idx
                                 end
                             end
                         end
                         if smallestDiff > 1 then
-                            AL:DebugPrint("      -> Best match diff is > 1. Discarding match.")
                             matchedIndex = nil 
-                        else
-                            AL:DebugPrint(string.format("      -> Found a pending auction match with index %d.", matchedIndex))
                         end
                     end
 
@@ -183,7 +159,6 @@ function AL:ProcessInboxForSales()
                         if soldAuctionData then
                             quantity = soldAuctionData.quantity
                             itemLink = soldAuctionData.itemLink
-                            AL:DebugPrint(string.format("      -> Quantity from matched pending auction: %d", quantity))
                         end
                     end
 
@@ -191,10 +166,8 @@ function AL:ProcessInboxForSales()
                         local qtyFromSubject = subject and tonumber(string.match(subject, "%((%d+)%)"))
                         if qtyFromSubject then
                             quantity = qtyFromSubject
-                            AL:DebugPrint(string.format("      -> Quantity from mail subject: %d", quantity))
                         else
                             quantity = 1
-                            AL:DebugPrint("      -> No quantity in subject, defaulting to 1.")
                         end
                     end
                     
@@ -209,14 +182,11 @@ function AL:ProcessInboxForSales()
                             depositFee = matchedAuctionData.depositFee
                         end
                     end
-                    AL:DebugPrint(string.format("      -> Deposit fee for this sale: %d", depositFee))
 
-                    AL:DebugPrint(string.format("    -> FINAL: Recording sale for %s (x%d).", itemName, quantity))
                     self:RecordTransaction("SELL", "AUCTION", itemID, money, quantity)
                     self:AddToHistory("sales", { itemLink = itemLink, itemName = itemName, quantity = quantity, price = money, depositFee = depositFee, totalValue = originalValue, timestamp = time() })
                     
                     _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] = true
-                    AL:DebugPrint("      -> MailKey saved to processed list.")
                     didUpdate = true
 
                     if matchedIndex then
@@ -225,12 +195,8 @@ function AL:ProcessInboxForSales()
                             table.remove(candidates, bestMatchArrayIndex)
                         end
                     end
-                else
-                    AL:DebugPrint(string.format("    -> Item '%s' not found in Ledger cache. Skipping.", itemName))
                 end
             end
-        else
-            AL:DebugPrint(string.format("    -> Mail skipped. Reason: Already processed or not a valid sale invoice. (Processed: %s, IsSaleInvoice: %s, Money > 0: %s)", tostring( _G.AuctioneersLedgerFinances.processedMailIDs[mailKey] or false), tostring(invoiceType == "seller"), tostring(money > 0)))
         end
     end
 
@@ -244,10 +210,8 @@ function AL:ProcessInboxForSales()
     end
 
     if didUpdate and self.BlasterWindow and self.BlasterWindow:IsShown() then
-        AL:DebugPrint("  -> History updated, refreshing Blaster History panel.")
         self:RefreshBlasterHistory()
     end
-    AL:DebugPrint("ProcessInboxForSales: Finished.")
 end
 
 function AL:InitializeCoreHooks()

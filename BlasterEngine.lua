@@ -19,11 +19,8 @@ function AL:UnregisterBlasterEvents()
     end
 end
 
--- Diagnostic version of the Blaster's event handler
+-- The Blaster's event handler
 function AL:BlasterEventHandler(event, ...)
-    -- [[ BEGIN DIAGNOSTIC MODIFICATION ]]
-    self:DebugPrint(string.format("|cff999999BlasterEventHandler Fired: %s|r", event))
-
     if event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_UPDATED" then
         local itemKeyFromEvent
         if event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
@@ -33,12 +30,10 @@ function AL:BlasterEventHandler(event, ...)
         end
 
         if not itemKeyFromEvent then
-            self:DebugPrint("  - |cffff0000ERROR: itemKeyFromEvent is nil!|r")
             return
         end
 
         if self.isScanning and self.itemBeingScanned and itemKeyFromEvent.itemID == self.itemBeingScanned.itemID then
-            self:DebugPrint("  - |cff00ff00Item key match SUCCESS for Blaster Scan! Processing results...|r")
             if self.isMarketScan then
                 self:ProcessMarketScanResult(self.itemBeingScanned, itemKeyFromEvent, event)
             else
@@ -46,10 +41,7 @@ function AL:BlasterEventHandler(event, ...)
             end
             self.itemBeingScanned = nil
         elseif self.isCancelScanning and self.itemBeingCancelScanned and itemKeyFromEvent.itemID == self.itemBeingCancelScanned.itemKey.itemID then
-            self:DebugPrint("  - |cff00ff00Item key match SUCCESS for Cancel Scan! Processing results...|r")
             self:ProcessCancelScanResults(itemKeyFromEvent, event)
-        else
-            self:DebugPrint("  - |cffff0000Item key match FAILED! Ignoring results.|r")
         end
 
     elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
@@ -61,7 +53,6 @@ function AL:BlasterEventHandler(event, ...)
             self:HandlePostFailure(...)
         end
     end
-    -- [[ END DIAGNOSTIC MODIFICATION ]]
 end
 
 -- Failsafe timer for scans
@@ -142,32 +133,22 @@ function AL:ScanNextItem()
     
     self.itemBeingScanned = table.remove(self.itemsToScan, 1)
     if self.scanFailsafeTimer then self.scanFailsafeTimer:Cancel() end
-    -- [[ DIRECTIVE: Increase failsafe timer to 5.0 seconds for better stability ]]
     self.scanFailsafeTimer = C_Timer.After(5.0, function() AL:FailsafeScanStep() end)
     
     local itemToScan = self.itemBeingScanned
     local itemKey
 
-    self:DebugPrint("---------------------------------")
-    self:DebugPrint(string.format("Scanning item: |cffffff00%s|r", tostring(itemToScan.itemName)))
-
-    -- [[ BEGIN FIX for Auto-Pricing ]]
     local itemLocation
-    -- Only create an ItemLocation if we have bag and slot data (i.e., for inventory scans)
     if itemToScan.bag and itemToScan.slot then
         itemLocation = ItemLocation:CreateFromBagAndSlot(itemToScan.bag, itemToScan.slot)
     end
 
-    -- Use the most reliable API if we have a valid location
     if itemLocation and itemLocation:IsValid() and C_AuctionHouse.GetItemKeyFromItem then
         itemKey = C_AuctionHouse.GetItemKeyFromItem(itemLocation)
-        self:DebugPrint("  - LOGIC: Chose |c00ff00GetItemKeyFromItem|r (Most Reliable).")
     else
-        -- Fallback logic for market scans or if the item location is invalid
         if itemToScan.itemLink and string.find(itemToScan.itemLink, "item:") then
             local _, _, _, itemLevel, _, _, _, _, _, _, _, itemClassID = GetItemInfo(itemToScan.itemLink)
             
-            -- Manually parse the suffixID from the item link, as GetItemInfoInstant can be unreliable.
             local itemSuffixID = nil
             local linkContent = itemToScan.itemLink:match("item:([%d:]+)")
             if linkContent then
@@ -180,9 +161,6 @@ function AL:ScanNextItem()
                 end
             end
 
-            self:DebugPrint(string.format("  - FALLBACK: iLvl = |cff00ffff%s|r, ClassID = |cff00ffff%s|r, SuffixID = |cff00ffff%s|r (from link parsing)", tostring(itemLevel), tostring(itemClassID), tostring(itemSuffixID)))
-
-            -- For gear (Armor classID=4, Weapon classID=2), we may need itemLevel and suffixID.
             if itemLevel and itemLevel > 0 and (itemClassID == 4 or itemClassID == 2) then
                 if itemSuffixID and itemSuffixID ~= 0 then
                     itemKey = C_AuctionHouse.MakeItemKey(itemToScan.itemID, itemLevel, itemSuffixID)
@@ -190,37 +168,26 @@ function AL:ScanNextItem()
                     itemKey = C_AuctionHouse.MakeItemKey(itemToScan.itemID, itemLevel)
                 end
             else
-                -- For everything else (commodities, etc.), just use the itemID.
                 itemKey = C_AuctionHouse.MakeItemKey(itemToScan.itemID)
             end
         else
-            -- Final fallback if no item link
             itemKey = C_AuctionHouse.MakeItemKey(itemToScan.itemID)
         end
-        self:DebugPrint("  - LOGIC: Used |cffff0000Fallback|r manual key generation.")
     end
-    -- [[ END FIX for Auto-Pricing ]]
     
     if not itemKey then
-        self:DebugPrint("  - |cffff0000ERROR: Could not generate a valid itemKey!|r Skipping item.")
-        self:FailsafeScanStep() -- Treat as a timeout/failure
+        self:FailsafeScanStep()
         return
     end
-
-    self:DebugPrint("---------------------------------")
     
     self:SetBlasterStatus(string.format("Searching for %s... (%d left)", itemToScan.itemName or "item", #self.itemsToScan), {0.7, 0.7, 1, 1})
     
     local _, _, _, _, _, _, _, _, _, _, itemClassID = GetItemInfo(itemToScan.itemLink or itemToScan.itemID)
     local sorts = { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } }
 
-    -- For gear (Armor classID=4, Weapon classID=2), use SendSellSearchQuery to find all variants.
     if itemClassID and (itemClassID == 2 or itemClassID == 4) then
-        self:DebugPrint("  - SEARCH TYPE: Using |c00ff00SendSellSearchQuery|r for gear item.")
         C_AuctionHouse.SendSellSearchQuery(itemKey, sorts, false)
     else
-        -- For all other items (commodities, etc.), use the standard search.
-        self:DebugPrint("  - SEARCH TYPE: Using |c00ffffffSendSearchQuery|r for non-gear item.")
         C_AuctionHouse.SendSearchQuery(itemKey, sorts, false)
     end
 end

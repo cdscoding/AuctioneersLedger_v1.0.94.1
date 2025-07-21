@@ -3,15 +3,9 @@
 
 AL.ahTabHooked = false -- Keep track of our hook
 
--- [[ AL-PATCH START ]] --
--- REMOVED: The old lastPurchaseEvent and lastChatEvent variables are no longer needed.
--- Our new system in Hooks.lua is more robust.
--- [[ AL-PATCH END ]] --
-
 -- Internal function to process purchase events. This function is now called by our new system.
 function AL:ProcessPurchase(itemName, itemLink, quantity, price)
     if not itemName or not quantity or not price or price <= 0 then
-        AL:DebugPrint("|cffff0000ERROR:|r ProcessPurchase called with invalid data. Aborting.")
         return
     end
 
@@ -20,7 +14,6 @@ function AL:ProcessPurchase(itemName, itemLink, quantity, price)
     self:RefreshBlasterHistory()
 
     if not itemLink then
-        AL:DebugPrint("...Purchase recorded to history by name. P&L will be updated when item is added to Ledger.")
         return
     end
 
@@ -31,19 +24,11 @@ function AL:ProcessPurchase(itemName, itemLink, quantity, price)
     local isTracked = (_G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID])
     
     if isTracked then
-        AL:DebugPrint("...Item is already tracked. Recording transaction for P&L.")
         self:RecordTransaction("AUCTION_BUY", itemID, -price, quantity)
     else
-        AL:DebugPrint("...Item is not tracked. Showing confirmation popup.")
         StaticPopup_Show("AL_CONFIRM_TRACK_NEW_PURCHASE", itemName, nil, { itemName = itemName, itemLink = itemLink, itemID = itemID, price = price, quantity = quantity })
     end
 end
-
--- [[ AL-PATCH START ]] --
--- REMOVED: The old FinalizePurchaseFromEvents function is replaced by the more robust
--- system now located in Hooks.lua.
--- [[ AL-PATCH END ]] --
-
 
 function AL:InitializeLibs()
     if self.libsReady then return end
@@ -109,7 +94,6 @@ function AL:HandlePlayerLogin()
         AL:ApplyWindowState()
         AL:StartStopPeriodicRefresh()
         AL.previousMoney = GetMoney()
-        -- [[ NEW: Initial cache build on login ]] --
         AL:BuildSalesCache()
     end)
 end
@@ -138,10 +122,6 @@ eventHandlerFrame:RegisterEvent("MAIL_SEND_SUCCESS")
 eventHandlerFrame:RegisterEvent("MERCHANT_SHOW")
 eventHandlerFrame:RegisterEvent("MERCHANT_CLOSED")
 eventHandlerFrame:RegisterEvent("TRADE_SHOW")
--- [[ AL-PATCH START ]] --
--- REMOVED: CHAT_MSG_SYSTEM is no longer needed here.
--- Our new hook in Hooks.lua is more reliable.
--- [[ AL-PATCH END ]] --
 eventHandlerFrame:RegisterEvent("COMMODITY_PURCHASE_SUCCEEDED")
 eventHandlerFrame:RegisterEvent("PLAYER_MONEY")
 
@@ -155,13 +135,11 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         AL:HandlePlayerEnteringWorld()
     
     elseif event == "AUCTION_HOUSE_SHOW" then
-        -- [[ DIRECTIVE: Add Blaster button to the AH frame, ensuring it exists first ]]
         if not _G["AL_AHBlasterButton"] then
             if AuctionHouseFrame then
                 local ahButton = CreateFrame("Button", "AL_AHBlasterButton", AuctionHouseFrame, "UIPanelButtonTemplate")
                 ahButton:SetSize(80, 22)
                 ahButton:SetText("Blaster")
-                -- Anchor the button above the main AH frame in the top-right corner
                 ahButton:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", 0, 5)
                 ahButton:SetScript("OnClick", function() AL:ToggleBlasterWindow() end)
             end
@@ -198,7 +176,6 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
             if not _G.AL_SavedData.PendingAuctions[charKey] then _G.AL_SavedData.PendingAuctions[charKey] = {} end
             table.insert(_G.AL_SavedData.PendingAuctions[charKey], { itemLink = details.itemLink, quantity = details.quantity, totalValue = totalAuctionValue, depositFee = details.depositFee, postTime = time() })
             
-            -- [[ NEW: Rebuild cache after a successful post ]] --
             AL:BuildSalesCache()
 
             AL:RefreshBlasterHistory()
@@ -214,8 +191,6 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
             if itemLink then AL:ProcessPurchase(itemName, itemLink, quantity, price) end
         end)
 
-    -- [[ AL-PATCH START ]] --
-    -- UPDATED: This logic now just captures the cost and calls the matching function.
     elseif event == "PLAYER_MONEY" then
         local currentMoney = GetMoney()
         if currentMoney ~= AL.previousMoney then
@@ -230,11 +205,6 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
             end
             AL.previousMoney = currentMoney
         end
-    -- [[ AL-PATCH END ]] --
-
-    -- [[ AL-PATCH START ]] --
-    -- REMOVED: The old CHAT_MSG_SYSTEM handler is now obsolete.
-    -- [[ AL-PATCH END ]] --
 
     elseif event == "MAIL_INBOX_UPDATE" then
         if AL.mailRefreshTimer then AL.mailRefreshTimer:Cancel() end

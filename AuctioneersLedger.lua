@@ -22,8 +22,8 @@ AL.DEBUG_INVOICE_TEST = false
 AL.DEBUG_MAIL_NO_SAVE = false -- SET TO TRUE FOR TESTING, FALSE FOR RELEASE
 
 function AL:DebugPrint(message)
-    -- [[ DEBUGGING: Master debug switch enabled for this session. ]]
-    if true then 
+    -- Master debug switch is now disabled for release.
+    if false then 
         print("|cff00ff00[AL Debug]|r " .. tostring(message))
     end
 end
