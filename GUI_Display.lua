@@ -87,30 +87,30 @@ function AL:CreateItemRowFrame(parent, itemData, yOffset, isEvenRow, precomputed
     return r
 end
 
--- [[ NEW VERSION: This function now processes rows in batches to prevent UI freezes. ]]
+-- [[ DIRECTIVE: Multi-Location Tracking & Performance Upgrade ]]
+-- This function is rewritten to handle multi-location display and to process rows in batches,
+-- preventing UI freezes with large ledgers.
 function AL:RefreshLedgerDisplay()
     if not self.ScrollChild or not AL.currentActiveTab or not _G.AL_SavedData.Settings.filterSettings[AL.currentActiveTab] then return end
 
-    -- Cancel any previous refresh that might be in progress
     if self.rowCreationTimer then
         self.rowCreationTimer:Cancel()
         self.rowCreationTimer = nil
     end
 
-    -- Clear existing rows and update the main layout
     for _, f in ipairs(self.itemRowFrames or {}) do f:Hide(); f:SetParent(nil) end
-    wipe(self.itemRowFrames);
+    wipe(self.itemRowFrames)
     self:UpdateLayout()
 
-    -- This inner function will create a batch of rows
     local function ProcessRowBatch(displayData, startIndex)
-        local batchSize = 30 -- Process 30 rows per batch
+        local batchSize = 30
         local yOffset = (startIndex - 1) * AL.ITEM_ROW_HEIGHT
 
         for i = startIndex, math.min(startIndex + batchSize - 1, #displayData) do
             local entry = displayData[i]
             local isEvenRow = (#AL.itemRowFrames % 2 == 0)
             local rowFrame
+
             if entry.type == "parent" then
                 rowFrame = AL:CreateItemRowFrame(AL.ScrollChild, entry.data, yOffset, isEvenRow, nil, true, entry.data.isExpanded)
             elseif entry.type == "child" then
@@ -121,26 +121,20 @@ function AL:RefreshLedgerDisplay()
                 table.insert(AL.itemRowFrames, rowFrame)
                 yOffset = yOffset + AL.ITEM_ROW_HEIGHT
                 
-                -- [[ This block was copied from the original function to set column visibility ]]
+                -- Column Visibility Logic (copied from original function)
                 local elements = {rowFrame.locationFS, rowFrame.ownedFS, rowFrame.notesFS, rowFrame.locCharacterFS, rowFrame.locRealmFS, rowFrame.finCharacterFS, rowFrame.finRealmFS, rowFrame.finTotalBoughtFS, rowFrame.finTotalSoldFS, rowFrame.finTotalProfitFS, rowFrame.finTotalLossFS, rowFrame.apCharacterFS, rowFrame.apRealmFS, rowFrame.autoPricingCB, rowFrame.safetyNetBuyoutInputs.container, rowFrame.normalBuyoutPriceInputs.container, rowFrame.undercutAmountInputs.container, rowFrame.asCharacterFS, rowFrame.asRealmFS, rowFrame.durationContainer, rowFrame.asStackableFS, rowFrame.asQuantityEB, rowFrame.asQuantityFS_NA, rowFrame.childDeleteButton, rowFrame.parentDeleteButton}; for _, el in ipairs(elements) do if el then el:Hide() end end; if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then if not rowFrame.isParentRow then rowFrame.locCharacterFS:Show(); rowFrame.locRealmFS:Show(); rowFrame.notesFS:Show(); rowFrame.locationFS:Show(); rowFrame.ownedFS:Show(); rowFrame.childDeleteButton:Show() else rowFrame.parentDeleteButton:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_FINANCES or AL.currentActiveTab == AL.VIEW_VENDOR_FINANCES then if not rowFrame.isParentRow then rowFrame.finCharacterFS:Show(); rowFrame.finRealmFS:Show(); rowFrame.finTotalBoughtFS:Show(); rowFrame.finTotalSoldFS:Show(); rowFrame.finTotalProfitFS:Show(); rowFrame.finTotalLossFS:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_PRICING then if not rowFrame.isParentRow then rowFrame.apCharacterFS:Show(); rowFrame.apRealmFS:Show(); rowFrame.autoPricingCB:Show(); rowFrame.safetyNetBuyoutInputs.container:Show(); rowFrame.normalBuyoutPriceInputs.container:Show(); rowFrame.undercutAmountInputs.container:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_SETTINGS then if not rowFrame.isParentRow then rowFrame.asCharacterFS:Show(); rowFrame.asRealmFS:Show(); rowFrame.durationContainer:Show(); rowFrame.asStackableFS:Show(); local itemData = entry.data.original; local ok, stack = pcall(function() return select(8, GetItemInfo(itemData.itemLink or itemData.itemID)) end); local maxStack = (ok and tonumber(stack)) or 1; local isStackable = maxStack > 1; if isStackable then rowFrame.asQuantityEB:Show(); rowFrame.asQuantityFS_NA:Hide() else rowFrame.asQuantityEB:Hide(); rowFrame.asQuantityFS_NA:Show() end end end
             end
         end
 
-        -- Update the scroll child height
-        AL.ScrollChild:SetHeight(math.max(10, #AL.itemRowFrames * AL.ITEM_ROW_HEIGHT))
+        AL.ScrollChild:SetHeight(math.max(10, yOffset))
 
-        -- If there are more rows, schedule the next batch
         if startIndex + batchSize <= #displayData then
-            AL.rowCreationTimer = C_Timer.After(0, function()
-                ProcessRowBatch(displayData, startIndex + batchSize)
-            end)
+            AL.rowCreationTimer = C_Timer.After(0, function() ProcessRowBatch(displayData, startIndex + batchSize) end)
         else
-            AL.rowCreationTimer = nil -- All done
+            AL.rowCreationTimer = nil
         end
     end
 
-    -- STEP 1: Gather and sort all data (this is fast)
-    local finalDisplayData = {}
     local allCharacterEntries = {}
     for itemID, itemEntry in pairs(_G.AL_SavedData.Items or {}) do
         if tonumber(itemID) and type(itemEntry) == "table" and type(itemEntry.characters) == "table" then
@@ -148,7 +142,7 @@ function AL:RefreshLedgerDisplay()
                 if type(charData) == "table" and (itemEntry.itemLink or charData.itemLink) then
                     table.insert(allCharacterEntries, {
                         itemID = itemID, itemLink = itemEntry.itemLink or charData.itemLink, itemName = itemEntry.itemName, itemTexture = itemEntry.itemTexture, itemRarity = itemEntry.itemRarity,
-                        characterName = charData.characterName, characterRealm = charData.characterRealm, lastVerifiedLocation = charData.lastVerifiedLocation, lastVerifiedCount = charData.lastVerifiedCount, lastVerifiedTimestamp = charData.lastVerifiedTimestamp, awaitingMailAfterAuctionCancel = charData.awaitingMailAfterAuctionCancel,
+                        characterName = charData.characterName, characterRealm = charData.characterRealm,
                         safetyNetBuyout = charData.safetyNetBuyout or 0, normalBuyoutPrice = charData.normalBuyoutPrice or 0, undercutAmount = charData.undercutAmount or 0, auctionSettings = charData.auctionSettings or {duration=720, quantity=1}, autoUpdateFromMarket = charData.autoUpdateFromMarket,
                         totalAuctionBoughtQty = charData.totalAuctionBoughtQty or 0, totalAuctionSoldQty = charData.totalAuctionSoldQty or 0, totalAuctionProfit = charData.totalAuctionProfit or 0, totalAuctionLoss = charData.totalAuctionLoss or 0,
                         totalVendorBoughtQty = charData.totalVendorBoughtQty or 0, totalVendorSoldQty = charData.totalVendorSoldQty or 0, totalVendorProfit = charData.totalVendorProfit or 0, totalVendorLoss = charData.totalVendorLoss or 0,
@@ -159,44 +153,116 @@ function AL:RefreshLedgerDisplay()
     end
 
     local currentFilters = _G.AL_SavedData.Settings.filterSettings[AL.currentActiveTab]
-    local initialItemsToProcess = {}; local ok, err = pcall(function() if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then for _, entry in ipairs(allCharacterEntries) do table.insert(initialItemsToProcess, { original = entry, details = self:GetItemOwnershipDetails(entry) }) end else for _, entry in ipairs(allCharacterEntries) do table.insert(initialItemsToProcess, { original = entry }) end end end); if not ok then return end
-    local itemsToProcess = {}; for _, item in ipairs(initialItemsToProcess) do local passesAllFilters = true; local filter_ok, filter_err = pcall(function() local qualityFilter = currentFilters.quality; if qualityFilter ~= nil and qualityFilter ~= -1 then if not (item.original.itemRarity == qualityFilter or (qualityFilter == 5 and item.original.itemRarity >= 5)) then passesAllFilters = false end end; if passesAllFilters and currentFilters.stack then local _, _, _, _, _, _, _, maxStack = GetItemInfo(item.original.itemLink or item.original.itemID); local isStackable = (tonumber(maxStack) or 1) > 1; if (currentFilters.stack == AL.FILTER_STACKABLE and not isStackable) or (currentFilters.stack == AL.FILTER_NONSTACKABLE and isStackable) then passesAllFilters = false end end end); if passesAllFilters then table.insert(itemsToProcess, item) end end
+    local itemsToProcess = {}
+    if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then
+        for _, entry in ipairs(allCharacterEntries) do
+            local all_details = self:GetAllItemOwnershipDetails(entry)
+            if #all_details > 0 then
+                table.insert(itemsToProcess, { original = entry, details = all_details })
+            end
+        end
+    else
+        for _, entry in ipairs(allCharacterEntries) do table.insert(itemsToProcess, { original = entry }) end
+    end
+
+    local filteredItems = {}
+    for _, item in ipairs(itemsToProcess) do
+        local passesAllFilters = true
+        local qualityFilter = currentFilters.quality
+        if qualityFilter ~= nil and qualityFilter ~= -1 then
+            if not (item.original.itemRarity == qualityFilter or (qualityFilter == 5 and item.original.itemRarity >= 5)) then
+                passesAllFilters = false
+            end
+        end
+        if passesAllFilters and currentFilters.stack then
+            local _, _, _, _, _, _, _, maxStack = GetItemInfo(item.original.itemLink or item.original.itemID)
+            local isStackable = (tonumber(maxStack) or 1) > 1
+            if (currentFilters.stack == AL.FILTER_STACKABLE and not isStackable) or (currentFilters.stack == AL.FILTER_NONSTACKABLE and isStackable) then
+                passesAllFilters = false
+            end
+        end
+        if passesAllFilters then table.insert(filteredItems, item) end
+    end
+    itemsToProcess = filteredItems
+
+    local finalDisplayData = {}
+    if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK and currentFilters.view == "GROUPED_BY_ITEM" then
+        local groupedByItem = {}
+        for _, augmentedEntry in ipairs(itemsToProcess) do
+            local itemID = augmentedEntry.original.itemID
+            if not groupedByItem[itemID] then
+                groupedByItem[itemID] = {itemID = itemID, itemName = augmentedEntry.original.itemName, itemTexture = augmentedEntry.original.itemTexture, itemRarity = augmentedEntry.original.itemRarity, itemLink = augmentedEntry.original.itemLink, isExpanded = (_G.AL_SavedData.Settings.itemExpansionStates[itemID]) or false, characters = {}}
+            end
+            table.insert(groupedByItem[itemID].characters, augmentedEntry)
+        end
+        local parentRowDataForSorting = {}
+        for _, groupData in pairs(groupedByItem) do table.insert(parentRowDataForSorting, groupData) end
+        table.sort(parentRowDataForSorting, function(a,b) return (a.itemName or "") < (b.itemName or "") end)
+        for _, groupData in ipairs(parentRowDataForSorting) do
+            table.insert(finalDisplayData, {type = "parent", data = groupData})
+            if groupData.isExpanded then
+                table.sort(groupData.characters, function(a,b) if a.original.characterName == b.original.characterName then return (a.original.characterRealm or "") < (b.original.characterRealm or "") end return (a.original.characterName or "") < (b.original.characterName or "") end)
+                for _, childCharacterEntry in ipairs(groupData.characters) do
+                    for _, locationDetail in ipairs(childCharacterEntry.details) do
+                        table.insert(finalDisplayData, {type = "child", data = { original = childCharacterEntry.original, details = locationDetail }})
+                    end
+                end
+            end
+        end
+    else
+        local flatList = {}
+        if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then
+            for _, augmentedEntry in ipairs(itemsToProcess) do
+                for _, locationDetail in ipairs(augmentedEntry.details) do
+                    table.insert(flatList, { original = augmentedEntry.original, details = locationDetail })
+                end
+            end
+        else
+            flatList = itemsToProcess
+        end
+
+        table.sort(flatList, function(a_entry, b_entry) 
+            local a, b = a_entry.original, b_entry.original
+            local a_name, b_name = a.itemName or "", b.itemName or ""
+            local a_char, b_char = a.characterName or "", b.characterName or ""
+            local a_realm, b_realm = a.characterRealm or "", b.characterRealm or ""
+            if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then
+                if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char end
+                elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm end
+                else
+                    local targetLoc;
+                    if currentFilters.sort == AL.SORT_BAGS then targetLoc = AL.LOCATION_BAGS
+                    elseif currentFilters.sort == AL.SORT_BANK then targetLoc = AL.LOCATION_BANK
+                    elseif currentFilters.sort == AL.SORT_MAIL then targetLoc = AL.LOCATION_MAIL
+                    elseif currentFilters.sort == AL.SORT_AUCTION then targetLoc = AL.LOCATION_AUCTION_HOUSE
+                    elseif currentFilters.sort == AL.SORT_LIMBO then targetLoc = AL.LOCATION_LIMBO
+                    elseif currentFilters.sort == AL.SORT_WARBAND_BANK then targetLoc = AL.LOCATION_WARBAND_BANK
+                    elseif currentFilters.sort == AL.SORT_REAGENT_BANK then targetLoc = AL.LOCATION_REAGENT_BANK
+                    end
+                    if targetLoc then
+                        local aIsTarget = (a_entry.details and a_entry.details.locationText == targetLoc)
+                        local bIsTarget = (b_entry.details and b_entry.details.locationText == targetLoc)
+                        if aIsTarget and not bIsTarget then return true end
+                        if not aIsTarget and bIsTarget then return false end
+                    end
+                end
+            elseif AL.currentActiveTab ~= AL.VIEW_WARBAND_STOCK then
+                if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char end
+                elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm end
+                end
+            end
+            if a_name ~= b_name then return a_name < b_name end
+            if a_char ~= b_char then return a_char < b_char end
+            return a_realm < b_realm
+        end)
+        for _, augmentedEntry in ipairs(flatList) do
+            table.insert(finalDisplayData, {type = "child", data = augmentedEntry})
+        end
+    end
     
-    if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK and currentFilters.view == "GROUPED_BY_ITEM" then local groupedByItem = {}; for _, augmentedEntry in ipairs(itemsToProcess) do local itemID = augmentedEntry.original.itemID; if not groupedByItem[itemID] then groupedByItem[itemID] = {itemID = itemID, itemName = augmentedEntry.original.itemName, itemTexture = augmentedEntry.original.itemTexture, itemRarity = augmentedEntry.original.itemRarity, itemLink = augmentedEntry.original.itemLink, isExpanded = (_G.AL_SavedData.Settings.itemExpansionStates[itemID]) or false, characters = {}} end; table.insert(groupedByItem[itemID].characters, augmentedEntry) end; local parentRowDataForSorting = {}; for _, groupData in pairs(groupedByItem) do table.insert(parentRowDataForSorting, groupData) end; table.sort(parentRowDataForSorting, function(a,b) return (a.itemName or "") < (b.itemName or "") end); for _, groupData in ipairs(parentRowDataForSorting) do table.insert(finalDisplayData, {type = "parent", data = groupData}); if groupData.isExpanded then table.sort(groupData.characters, function(a,b) if a.original.characterName == b.original.characterName then return (a.original.characterRealm or "") < (b.original.characterRealm or "") end return (a.original.characterName or "") < (b.original.characterName or "") end); for _, childAugmentedEntry in ipairs(groupData.characters) do table.insert(finalDisplayData, {type = "child", data = childAugmentedEntry}) end end end
-    else table.sort(itemsToProcess, function(a_entry, b_entry) local a, b = a_entry.original, b_entry.original; local a_name, b_name = a.itemName or "", b.itemName or ""; local a_char, b_char = a.characterName or "", b.characterName or ""; local a_realm, b_realm = a.characterRealm or "", b.characterRealm or ""; if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char; end; if a_name ~= b_name then return a_name < b_name; end; return a_realm < b_realm; elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm; end; if a_char ~= b_char then return a_char < b_char; end; return a_name < b_name; else local targetLoc; if currentFilters.sort == AL.SORT_BAGS then targetLoc = AL.LOCATION_BAGS elseif currentFilters.sort == AL.SORT_BANK then targetLoc = AL.LOCATION_BANK elseif currentFilters.sort == AL.SORT_MAIL then targetLoc = AL.LOCATION_MAIL elseif currentFilters.sort == AL.SORT_AUCTION then targetLoc = AL.LOCATION_AUCTION_HOUSE elseif currentFilters.sort == AL.SORT_LIMBO then targetLoc = AL.LOCATION_LIMBO elseif currentFilters.sort == AL.SORT_WARBAND_BANK then targetLoc = AL.LOCATION_WARBAND_BANK elseif currentFilters.sort == AL.SORT_REAGENT_BANK then targetLoc = AL.LOCATION_REAGENT_BANK end; if targetLoc then local aIsTarget = (a_entry.details and a_entry.details.locationText == targetLoc); local bIsTarget = (b_entry.details and b_entry.details.locationText == targetLoc); if aIsTarget and not bIsTarget then return true; end; if not aIsTarget and bIsTarget then return false; end; end end elseif AL.currentActiveTab == AL.VIEW_AUCTION_FINANCES or AL.currentActiveTab == AL.VIEW_VENDOR_FINANCES or AL.currentActiveTab == AL.VIEW_AUCTION_PRICING or AL.currentActiveTab == AL.VIEW_AUCTION_SETTINGS then if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char end elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm end end end; if a_name ~= b_name then return a_name < b_name end; if a_char ~= b_char then return a_char < b_char end; return a_realm < b_realm end); for _, augmentedEntry in ipairs(itemsToProcess) do table.insert(finalDisplayData, {type = "child", data = augmentedEntry}) end end
-    
-    -- STEP 2: Start the asynchronous batch creation of UI elements
     if #finalDisplayData > 0 then
         ProcessRowBatch(finalDisplayData, 1)
+    else
+        self.ScrollChild:SetHeight(10)
     end
-end
-
-function AL:RefreshLedgerDisplay()
-    if not self.ScrollChild or not AL.currentActiveTab or not _G.AL_SavedData.Settings.filterSettings[AL.currentActiveTab] then return end
-    local currentFilters = _G.AL_SavedData.Settings.filterSettings[AL.currentActiveTab]
-    for _, f in ipairs(self.itemRowFrames or {}) do f:Hide(); f:SetParent(nil) end
-    wipe(self.itemRowFrames); local yOffset = 0; self:UpdateLayout()
-    local finalDisplayData = {}; local allCharacterEntries = {}
-    for itemID, itemEntry in pairs(_G.AL_SavedData.Items or {}) do
-        if tonumber(itemID) and type(itemEntry) == "table" and type(itemEntry.characters) == "table" then
-            for charKey, charData in pairs(itemEntry.characters) do
-                if type(charData) == "table" and (itemEntry.itemLink or charData.itemLink) then
-                    table.insert(allCharacterEntries, {
-                        itemID = itemID, itemLink = itemEntry.itemLink or charData.itemLink, itemName = itemEntry.itemName, itemTexture = itemEntry.itemTexture, itemRarity = itemEntry.itemRarity,
-                        characterName = charData.characterName, characterRealm = charData.characterRealm, lastVerifiedLocation = charData.lastVerifiedLocation, lastVerifiedCount = charData.lastVerifiedCount, lastVerifiedTimestamp = charData.lastVerifiedTimestamp, awaitingMailAfterAuctionCancel = charData.awaitingMailAfterAuctionCancel,
-                        safetyNetBuyout = charData.safetyNetBuyout or 0, normalBuyoutPrice = charData.normalBuyoutPrice or 0, undercutAmount = charData.undercutAmount or 0, auctionSettings = charData.auctionSettings or {duration=720, quantity=1}, autoUpdateFromMarket = charData.autoUpdateFromMarket,
-                        totalAuctionBoughtQty = charData.totalAuctionBoughtQty or 0, totalAuctionSoldQty = charData.totalAuctionSoldQty or 0, totalAuctionProfit = charData.totalAuctionProfit or 0, totalAuctionLoss = charData.totalAuctionLoss or 0,
-                        totalVendorBoughtQty = charData.totalVendorBoughtQty or 0, totalVendorSoldQty = charData.totalVendorSoldQty or 0, totalVendorProfit = charData.totalVendorProfit or 0, totalVendorLoss = charData.totalVendorLoss or 0,
-                    })
-                end
-            end
-        end
-    end
-    
-    local initialItemsToProcess = {}; local ok, err = pcall(function() if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then for _, entry in ipairs(allCharacterEntries) do table.insert(initialItemsToProcess, { original = entry, details = self:GetItemOwnershipDetails(entry) }) end else for _, entry in ipairs(allCharacterEntries) do table.insert(initialItemsToProcess, { original = entry }) end end end); if not ok then return end
-    local itemsToProcess = {}; for _, item in ipairs(initialItemsToProcess) do local passesAllFilters = true; local filter_ok, filter_err = pcall(function() local qualityFilter = currentFilters.quality; if qualityFilter ~= nil and qualityFilter ~= -1 then if not (item.original.itemRarity == qualityFilter or (qualityFilter == 5 and item.original.itemRarity >= 5)) then passesAllFilters = false end end; if passesAllFilters and currentFilters.stack then local _, _, _, _, _, _, _, maxStack = GetItemInfo(item.original.itemLink or item.original.itemID); local isStackable = (tonumber(maxStack) or 1) > 1; if (currentFilters.stack == AL.FILTER_STACKABLE and not isStackable) or (currentFilters.stack == AL.FILTER_NONSTACKABLE and isStackable) then passesAllFilters = false end end end); if passesAllFilters then table.insert(itemsToProcess, item) end end
-    if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK and currentFilters.view == "GROUPED_BY_ITEM" then local groupedByItem = {}; for _, augmentedEntry in ipairs(itemsToProcess) do local itemID = augmentedEntry.original.itemID; if not groupedByItem[itemID] then groupedByItem[itemID] = {itemID = itemID, itemName = augmentedEntry.original.itemName, itemTexture = augmentedEntry.original.itemTexture, itemRarity = augmentedEntry.original.itemRarity, itemLink = augmentedEntry.original.itemLink, isExpanded = (_G.AL_SavedData.Settings.itemExpansionStates[itemID]) or false, characters = {}} end; table.insert(groupedByItem[itemID].characters, augmentedEntry) end; local parentRowDataForSorting = {}; for _, groupData in pairs(groupedByItem) do table.insert(parentRowDataForSorting, groupData) end; table.sort(parentRowDataForSorting, function(a,b) return (a.itemName or "") < (b.itemName or "") end); for _, groupData in ipairs(parentRowDataForSorting) do table.insert(finalDisplayData, {type = "parent", data = groupData}); if groupData.isExpanded then table.sort(groupData.characters, function(a,b) if a.original.characterName == b.original.characterName then return (a.original.characterRealm or "") < (b.original.characterRealm or "") end return (a.original.characterName or "") < (b.original.characterName or "") end); for _, childAugmentedEntry in ipairs(groupData.characters) do table.insert(finalDisplayData, {type = "child", data = childAugmentedEntry}) end end end
-    else table.sort(itemsToProcess, function(a_entry, b_entry) local a, b = a_entry.original, b_entry.original; local a_name, b_name = a.itemName or "", b.itemName or ""; local a_char, b_char = a.characterName or "", b.characterName or ""; local a_realm, b_realm = a.characterRealm or "", b.characterRealm or ""; if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char; end; if a_name ~= b_name then return a_name < b_name; end; return a_realm < b_realm; elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm; end; if a_char ~= b_char then return a_char < b_char; end; return a_name < b_name; else local targetLoc; if currentFilters.sort == AL.SORT_BAGS then targetLoc = AL.LOCATION_BAGS elseif currentFilters.sort == AL.SORT_BANK then targetLoc = AL.LOCATION_BANK elseif currentFilters.sort == AL.SORT_MAIL then targetLoc = AL.LOCATION_MAIL elseif currentFilters.sort == AL.SORT_AUCTION then targetLoc = AL.LOCATION_AUCTION_HOUSE elseif currentFilters.sort == AL.SORT_LIMBO then targetLoc = AL.LOCATION_LIMBO elseif currentFilters.sort == AL.SORT_WARBAND_BANK then targetLoc = AL.LOCATION_WARBAND_BANK elseif currentFilters.sort == AL.SORT_REAGENT_BANK then targetLoc = AL.LOCATION_REAGENT_BANK end; if targetLoc then local aIsTarget = (a_entry.details and a_entry.details.locationText == targetLoc); local bIsTarget = (b_entry.details and b_entry.details.locationText == targetLoc); if aIsTarget and not bIsTarget then return true; end; if not aIsTarget and bIsTarget then return false; end; end end elseif AL.currentActiveTab == AL.VIEW_AUCTION_FINANCES or AL.currentActiveTab == AL.VIEW_VENDOR_FINANCES or AL.currentActiveTab == AL.VIEW_AUCTION_PRICING or AL.currentActiveTab == AL.VIEW_AUCTION_SETTINGS then if currentFilters.sort == AL.SORT_CHARACTER then if a_char ~= b_char then return a_char < b_char end elseif currentFilters.sort == AL.SORT_REALM then if a_realm ~= b_realm then return a_realm < b_realm end end end; if a_name ~= b_name then return a_name < b_name end; if a_char ~= b_char then return a_char < b_char end; return a_realm < b_realm end); for _, augmentedEntry in ipairs(itemsToProcess) do table.insert(finalDisplayData, {type = "child", data = augmentedEntry}) end end
-    for i, entry in ipairs(finalDisplayData) do local isEvenRow = (#self.itemRowFrames % 2 == 0); local rowFrame; if entry.type == "parent" then rowFrame = self:CreateItemRowFrame(self.ScrollChild, entry.data, yOffset, isEvenRow, nil, true, entry.data.isExpanded) elseif entry.type == "child" then rowFrame = self:CreateItemRowFrame(self.ScrollChild, entry.data.original, yOffset, isEvenRow, entry.data.details, false) end; if rowFrame then table.insert(self.itemRowFrames, rowFrame); yOffset = yOffset + AL.ITEM_ROW_HEIGHT; local elements = {rowFrame.locationFS, rowFrame.ownedFS, rowFrame.notesFS, rowFrame.locCharacterFS, rowFrame.locRealmFS, rowFrame.finCharacterFS, rowFrame.finRealmFS, rowFrame.finTotalBoughtFS, rowFrame.finTotalSoldFS, rowFrame.finTotalProfitFS, rowFrame.finTotalLossFS, rowFrame.apCharacterFS, rowFrame.apRealmFS, rowFrame.autoPricingCB, rowFrame.safetyNetBuyoutInputs.container, rowFrame.normalBuyoutPriceInputs.container, rowFrame.undercutAmountInputs.container, rowFrame.asCharacterFS, rowFrame.asRealmFS, rowFrame.durationContainer, rowFrame.asStackableFS, rowFrame.asQuantityEB, rowFrame.asQuantityFS_NA, rowFrame.childDeleteButton, rowFrame.parentDeleteButton}; for _, el in ipairs(elements) do if el then el:Hide() end end; if AL.currentActiveTab == AL.VIEW_WARBAND_STOCK then if not rowFrame.isParentRow then rowFrame.locCharacterFS:Show(); rowFrame.locRealmFS:Show(); rowFrame.notesFS:Show(); rowFrame.locationFS:Show(); rowFrame.ownedFS:Show(); rowFrame.childDeleteButton:Show() else rowFrame.parentDeleteButton:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_FINANCES or AL.currentActiveTab == AL.VIEW_VENDOR_FINANCES then if not rowFrame.isParentRow then rowFrame.finCharacterFS:Show(); rowFrame.finRealmFS:Show(); rowFrame.finTotalBoughtFS:Show(); rowFrame.finTotalSoldFS:Show(); rowFrame.finTotalProfitFS:Show(); rowFrame.finTotalLossFS:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_PRICING then if not rowFrame.isParentRow then rowFrame.apCharacterFS:Show(); rowFrame.apRealmFS:Show(); rowFrame.autoPricingCB:Show(); rowFrame.safetyNetBuyoutInputs.container:Show(); rowFrame.normalBuyoutPriceInputs.container:Show(); rowFrame.undercutAmountInputs.container:Show() end elseif AL.currentActiveTab == AL.VIEW_AUCTION_SETTINGS then if not rowFrame.isParentRow then rowFrame.asCharacterFS:Show(); rowFrame.asRealmFS:Show(); rowFrame.durationContainer:Show(); rowFrame.asStackableFS:Show(); local itemData = entry.data.original; local ok, stack = pcall(function() return select(8, GetItemInfo(itemData.itemLink or itemData.itemID)) end); local maxStack = (ok and tonumber(stack)) or 1; local isStackable = maxStack > 1; if isStackable then rowFrame.asQuantityEB:Show(); rowFrame.asQuantityFS_NA:Hide() else rowFrame.asQuantityEB:Hide(); rowFrame.asQuantityFS_NA:Show() end end end end end
-    self.ScrollChild:SetHeight(math.max(10, #self.itemRowFrames * AL.ITEM_ROW_HEIGHT))
 end

@@ -222,28 +222,36 @@ function AL:InitializeCoreHooks()
         eventHandler:SetScript("OnUpdate", function(...) AL:HandleOnUpdate(...) end)
     end
     hooksecurefunc("TakeInboxItem", function(mailIndex, attachmentIndex)
+        local itemLink = GetInboxItemLink(mailIndex, attachmentIndex)
+        if not itemLink then return end
+        
+        local itemID = AL:GetItemIDFromLink(itemLink)
+        if not itemID then return end
+        
+        local charKey = UnitName("player") .. "-" .. GetRealmName()
+        if _G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey] then
+            local charData = _G.AL_SavedData.Items[itemID].characters[charKey]
+            local _, _, _, itemCount = GetInboxItem(mailIndex, attachmentIndex)
+            charData.awaitingMailCount = math.max(0, (charData.awaitingMailCount or 0) - (itemCount or 0))
+        end
+
         local _, _, _, subject = GetInboxHeaderInfo(mailIndex)
         if subject and (subject:find("expired") or subject:find("Expired")) then
-            local itemLink = GetInboxItemLink(mailIndex, attachmentIndex)
-            if itemLink then
-                local itemID = self:GetItemIDFromLink(itemLink)
-                local _, _, itemCount = GetInboxItem(mailIndex, attachmentIndex)
-                if itemID and itemCount then
-                    local charKey = UnitName("player") .. "-" .. GetRealmName()
-                    local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
-                    if pendingAuctions then
-                         for idx = #pendingAuctions, 1, -1 do
-                            local auctionData = pendingAuctions[idx]
-                            if self:GetItemIDFromLink(auctionData.itemLink) == itemID and auctionData.quantity == itemCount then
-                                local removedAuction = table.remove(pendingAuctions, idx)
-                                local reliableItemLink = removedAuction.itemLink
-                                local itemName = reliableItemLink and GetItemInfo(reliableItemLink)
-                                self:RecordTransaction("DEPOSIT", "AUCTION", itemID, removedAuction.depositFee or 0, removedAuction.quantity)
-                                self:AddToHistory("cancellations", { itemName = itemName or "Unknown", itemLink = reliableItemLink, quantity = removedAuction.quantity, price = removedAuction.depositFee or 0, timestamp = time() })
-                                self:RefreshBlasterHistory()
-                                self:BuildSalesCache()
-                                break
-                            end
+            local _, _, itemCount = GetInboxItem(mailIndex, attachmentIndex)
+            if itemCount then
+                local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
+                if pendingAuctions then
+                     for idx = #pendingAuctions, 1, -1 do
+                        local auctionData = pendingAuctions[idx]
+                        if self:GetItemIDFromLink(auctionData.itemLink) == itemID and auctionData.quantity == itemCount then
+                            local removedAuction = table.remove(pendingAuctions, idx)
+                            local reliableItemLink = removedAuction.itemLink
+                            local itemName = reliableItemLink and GetItemInfo(reliableItemLink)
+                            self:RecordTransaction("DEPOSIT", "AUCTION", itemID, removedAuction.depositFee or 0, removedAuction.quantity)
+                            self:AddToHistory("cancellations", { itemName = itemName or "Unknown", itemLink = reliableItemLink, quantity = removedAuction.quantity, price = removedAuction.depositFee or 0, timestamp = time() })
+                            self:RefreshBlasterHistory()
+                            self:BuildSalesCache()
+                            break
                         end
                     end
                 end
@@ -280,7 +288,15 @@ function AL:InitializeAuctionHooks()
             if not auctionID then return end
             local cachedInfo = AL.auctionIDCache and AL.auctionIDCache[auctionID]
             if not cachedInfo or not cachedInfo.itemID then return end
+            
+            -- [[ DIRECTIVE: Mail Persistence ]]
+            -- Flag the item as being in transit to the mailbox.
             local charKey = UnitName("player") .. "-" .. GetRealmName()
+            if _G.AL_SavedData.Items and _G.AL_SavedData.Items[cachedInfo.itemID] and _G.AL_SavedData.Items[cachedInfo.itemID].characters[charKey] then
+                local charData = _G.AL_SavedData.Items[cachedInfo.itemID].characters[charKey]
+                charData.awaitingMailCount = (charData.awaitingMailCount or 0) + cachedInfo.quantity
+            end
+
             local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
             if pendingAuctions then
                 for idx = #pendingAuctions, 1, -1 do

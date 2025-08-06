@@ -141,6 +141,8 @@ function AL:InitializeDB()
     if type(_G.AL_SavedData.PendingAuctions) ~= "table" then _G.AL_SavedData.PendingAuctions = {} end
     if type(_G.AL_SavedData.TooltipCache) ~= "table" then _G.AL_SavedData.TooltipCache = {} end
     if type(_G.AL_SavedData.TooltipCache.recentlyViewedItems) ~= "table" then _G.AL_SavedData.TooltipCache.recentlyViewedItems = {} end
+    if type(_G.AL_SavedData.WarbandCache) ~= "table" then _G.AL_SavedData.WarbandCache = {} end
+    if type(_G.AL_SavedData.AuctionCache) ~= "table" then _G.AL_SavedData.AuctionCache = {} end
 end
 
 -- [[ REWRITTEN: RecordTransaction is now the central point for all financial calculations ]]
@@ -205,7 +207,7 @@ function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
 
     _G.AL_SavedData.Items[itemID].characters[charKey] = {
         characterName = forCharName, characterRealm = forCharRealm, itemLink = realItemLink, itemRarity = itemRarity,
-        lastVerifiedLocation = nil, lastVerifiedCount = 0, lastVerifiedTimestamp = 0, awaitingMailAfterAuctionCancel = false,
+        awaitingMailCount = 0, -- [[ DIRECTIVE: Mail Persistence ]]
         safetyNetBuyout = 0, normalBuyoutPrice = 0, undercutAmount = 0, autoUpdateFromMarket = true,
         auctionSettings = { duration = 720, quantity = defaultQuantity },
         marketData = { lastScan = 0, minBuyout = 0, marketValue = 0, numAuctions = 0, ALMarketPrice = 0 },
@@ -236,7 +238,7 @@ end
 function AL:GetSafeContainerItemInfo(bagIndex, slotIndex)
     if C_Container and type(C_Container.GetContainerItemInfo) == "function" then return C_Container.GetContainerItemInfo(bagIndex, slotIndex)
     elseif type(GetContainerItemInfo) == "function" then return GetContainerItemInfo(bagIndex, slotIndex) end
-    return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
+    return nil
 end
 
 function AL:GetItemIDFromLink(itemLink) if not itemLink or type(itemLink) ~= "string" then return nil end return tonumber(string.match(itemLink, "item:(%d+)")) end
@@ -288,211 +290,130 @@ function AL:TriggerDebouncedRefresh(reason)
     end)
 end
 
-function AL:GetItemOwnershipDetails(charData_in)
-    local d = {
-        liveLocation = nil, liveCount = 0,
-        locationText = AL.LOCATION_LIMBO, 
-        colorR, colorG, colorB, colorA = unpack(AL.COLOR_LIMBO),
-        displayText = "00", notesText = "", isStale = false, isLink = false
-    }
-    if not charData_in or not charData_in.characterName then 
-        return d 
-    end
+-- [[ DIRECTIVE: Multi-Location Tracking ]]
+-- This function replaces the old GetItemOwnershipDetails. It scans all possible locations for an item
+-- and returns a table of details, one for each location where the item is found.
+function AL:GetAllItemOwnershipDetails(charData_in)
+    local allDetails = {}
+    if not charData_in or not charData_in.characterName then return {} end
 
     local itemID = self:GetItemIDFromLink(charData_in.itemLink)
-    local itemCharacterName = charData_in.characterName
-    local itemCharacterRealm = charData_in.characterRealm 
-    
-    local charKey = itemCharacterName .. "-" .. itemCharacterRealm
+    if not itemID then return {} end
+
+    local charKey = charData_in.characterName .. "-" .. charData_in.characterRealm
     local charData = _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey]
-    if not charData then
-        return d
+    if not charData then return {} end
+
+    local isCurrentCharacter = (charData_in.characterName == UnitName("player") and charData_in.characterRealm == GetRealmName())
+
+    local function addDetail(location, count, isStale, notes)
+        local d = {
+            liveLocation = isStale and nil or location,
+            liveCount = count,
+            locationText = location,
+            colorR, colorG, colorB, colorA = 1, 1, 1, 1,
+            displayText = string.format("%02d", count),
+            notesText = notes or "",
+            isStale = isStale,
+            isLink = (location == AL.LOCATION_BAGS)
+        }
+
+        if location == AL.LOCATION_BAGS then d.colorR, d.colorG, d.colorB, d.colorA = GetItemQualityColor(charData_in.itemRarity or 1)
+        elseif location == AL.LOCATION_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_BANK_GOLD)
+        elseif location == AL.LOCATION_MAIL then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_MAIL_TAN)
+        elseif location == AL.LOCATION_AUCTION_HOUSE then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_AH_BLUE)
+        elseif location == AL.LOCATION_WARBAND_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_WARBAND_BANK)
+        elseif location == AL.LOCATION_REAGENT_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_REAGENT_BANK)
+        else d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_LIMBO) end
+
+        if isStale then
+            d.colorR, d.colorG, d.colorB = d.colorR * AL.COLOR_STALE_MULTIPLIER, d.colorG * AL.COLOR_STALE_MULTIPLIER, d.colorB * AL.COLOR_STALE_MULTIPLIER
+        end
+
+        table.insert(allDetails, d)
     end
 
-    local currentCharacter = UnitName("player")
-    local currentRealm = GetRealmName()
-    local isCurrentCharacterItemForPersonalCheck = (itemCharacterName == currentCharacter and itemCharacterRealm == currentRealm)
-    local itemFoundLiveThisPass = false
+    if isCurrentCharacter then
+        local bagsOnlyCount = C_Item.GetItemCount(itemID, false, false, false)
+        if bagsOnlyCount > 0 then addDetail(AL.LOCATION_BAGS, bagsOnlyCount, false) end
 
-    if isCurrentCharacterItemForPersonalCheck then
-        local bagsCount = GetItemCount(itemID, false, false, false)
-        if bagsCount > 0 then 
-            d.liveLocation = AL.LOCATION_BAGS; d.liveCount = bagsCount; itemFoundLiveThisPass = true;
-        end
+        local totalInBagsAndReagent = C_Item.GetItemCount(itemID, false, false, true)
+        local reagentBankOnlyCount = totalInBagsAndReagent - bagsOnlyCount
+        if reagentBankOnlyCount > 0 then addDetail(AL.LOCATION_REAGENT_BANK, reagentBankOnlyCount, false) end
 
-        if not itemFoundLiveThisPass then
-            local totalInBagsAndBank = GetItemCount(itemID, true, false, false) 
-            local bankCount = totalInBagsAndBank - bagsCount
-            if bankCount > 0 then 
-                d.liveLocation = AL.LOCATION_BANK; d.liveCount = bankCount; itemFoundLiveThisPass = true;
-            end
-        end
+        local totalInBagsBankAndReagent = C_Item.GetItemCount(itemID, true, false, true)
+        local bankOnlyCount = totalInBagsBankAndReagent - totalInBagsAndReagent
+        if bankOnlyCount > 0 then addDetail(AL.LOCATION_BANK, bankOnlyCount, false) end
         
-        if not itemFoundLiveThisPass then
-            local reagentBankCount = GetItemCount(itemID, false, false, true) 
-            if reagentBankCount > 0 then
-                d.liveLocation = AL.LOCATION_REAGENT_BANK; d.liveCount = reagentBankCount; itemFoundLiveThisPass = true;
-            end
-        end
-    end
-
-    if not itemFoundLiveThisPass then
-        local totalWarbandBankCount = 0;
-        if Enum and type(Enum.BagIndex) == "table" then
-            for i = 1, AL.MAX_WARBAND_BANK_TABS_TO_CHECK do
-                 local warbandBagID = _G["WARBAND_BANK_TAB_"..i.."_BAG_INDEX"] or (_G["Enum"] and _G["Enum"].BagIndex and _G["Enum"].BagIndex["AccountBankTab_"..i])
-                if warbandBagID and type(warbandBagID) == "number" then
-                    local numSlots = self:GetSafeContainerNumSlots(warbandBagID);
-                    if numSlots > 0 then
-                        for slot = 1, numSlots do
-                            local itemLink = self:GetSafeContainerItemLink(warbandBagID, slot);
-                            if itemLink then
-                                local linkItemID = self:GetItemIDFromLink(itemLink);
-                                if linkItemID and linkItemID == itemID then
-                                    local itemInfo1, itemInfo2 = self:GetSafeContainerItemInfo(warbandBagID, slot);
-                                    local slotItemCount = (type(itemInfo1) == "table" and itemInfo1.stackCount) or (type(itemInfo2) == "number" and itemInfo2) or 0
-                                    totalWarbandBankCount = totalWarbandBankCount + slotItemCount;
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        if totalWarbandBankCount > 0 then
-            d.liveLocation = AL.LOCATION_WARBAND_BANK; d.liveCount = totalWarbandBankCount; itemFoundLiveThisPass = true; 
-        end
-    end
-    
-    if isCurrentCharacterItemForPersonalCheck then
-        local itemFoundOnAHLive = false;
-        local isAHOpen = AuctionHouseFrame and AuctionHouseFrame:IsShown()
-        if isAHOpen then
-            local ahCountThisScan = 0;
-            if C_AuctionHouse and type(C_AuctionHouse.GetOwnedAuctions) == "function" then
-                local ownedAuctionsTable = C_AuctionHouse.GetOwnedAuctions();
-                if ownedAuctionsTable and type(ownedAuctionsTable) == "table" then
-                    for i, auctionEntry in ipairs(ownedAuctionsTable) do
-                        local entryItemID, entryItemCount;
-                        if auctionEntry and type(auctionEntry) == "table" then
-                            if auctionEntry.itemKey and type(auctionEntry.itemKey) == "table" and auctionEntry.itemKey.itemID and type(auctionEntry.itemKey.itemID) == "number" then entryItemID = auctionEntry.itemKey.itemID; end
-                            if auctionEntry.quantity and type(auctionEntry.quantity) == "number" then entryItemCount = auctionEntry.quantity; end
-                            if not entryItemID and auctionEntry.itemLink and type(auctionEntry.itemLink) == "string" then entryItemID = self:GetItemIDFromLink(auctionEntry.itemLink); if not entryItemCount and auctionEntry.count and type(auctionEntry.count) == "number" then entryItemCount = auctionEntry.count; end end
-                        end
-                        if entryItemID and entryItemCount and tonumber(entryItemID) == itemID then ahCountThisScan = ahCountThisScan + entryItemCount; end
-                    end
-                end
-                if ahCountThisScan > 0 then
-                    if not itemFoundLiveThisPass then
-                        d.liveLocation = AL.LOCATION_AUCTION_HOUSE; d.liveCount = ahCountThisScan; itemFoundLiveThisPass = true;
-                    end
-                    itemFoundOnAHLive = true;
-                    charData.awaitingMailAfterAuctionCancel = false; 
-                end
-            end
-        end
-        
-        if charData.lastVerifiedLocation == AL.LOCATION_AUCTION_HOUSE and isAHOpen and not itemFoundOnAHLive then
-            charData.awaitingMailAfterAuctionCancel = true;
-        end
-
         local isMailOpen = MailFrame and MailFrame:IsShown()
-        local shouldCheckMail = isMailOpen or charData.awaitingMailAfterAuctionCancel;
-        if not itemFoundLiveThisPass and shouldCheckMail and type(GetInboxNumItems) == "function" then 
-            local mailCountThisScan = 0;
-            for mailIndex = 1, GetInboxNumItems() do
-                local _, _, _, _, _, _, _, hasItem = GetInboxHeaderInfo(mailIndex);
-                if hasItem then
-                    for attachIndex = 1, AL.MAX_MAIL_ATTACHMENTS_TO_SCAN do
-                        local mailItemLink = GetInboxItemLink(mailIndex, attachIndex)
-                        if mailItemLink then
-                            if self:GetItemIDFromLink(mailItemLink) == itemID then
-                                -- [[ BUG FIX: Correctly unpack the return values from GetInboxItem ]]
-                                -- The 4th return value is the item count.
-                                local _, _, _, mailItemCount = GetInboxItem(mailIndex, attachIndex)
-                                mailCountThisScan = mailCountThisScan + (mailItemCount or 0)
-                            end
-                        else
+        if isMailOpen and GetInboxNumItems then
+            local mailCount = 0
+            for i = 1, GetInboxNumItems() do
+                if select(8, GetInboxHeaderInfo(i)) then -- hasItem
+                    for j = 1, AL.MAX_MAIL_ATTACHMENTS_TO_SCAN do
+                        local link = GetInboxItemLink(i, j)
+                        if link and self:GetItemIDFromLink(link) == itemID then
+                            mailCount = mailCount + (select(4, GetInboxItem(i, j)) or 0)
+                        elseif not link then
                             break
                         end
                     end
                 end
             end
-            if mailCountThisScan > 0 then
-                d.liveLocation = AL.LOCATION_MAIL; d.liveCount = mailCountThisScan; itemFoundLiveThisPass = true;
-                charData.awaitingMailAfterAuctionCancel = false; 
-            elseif charData.awaitingMailAfterAuctionCancel then 
-                charData.awaitingMailAfterAuctionCancel = false; 
+            if mailCount > 0 then
+                addDetail(AL.LOCATION_MAIL, mailCount, false)
+                charData.awaitingMailCount = 0 -- Live scan confirms mail contents
             end
         end
     end
-    
-    if not itemFoundLiveThisPass then
-        local lastLocation = charData.lastVerifiedLocation
-        
-        if isCurrentCharacterItemForPersonalCheck and charData.awaitingMailAfterAuctionCancel then
-            d.locationText = AL.LOCATION_MAIL
-            d.liveCount = charData.lastVerifiedCount > 0 and charData.lastVerifiedCount or 0
-            d.displayText = string.format("%02d", d.liveCount)
-            d.isStale = true
-            d.notesText = "Returning from AH"
-        elseif isCurrentCharacterItemForPersonalCheck and (lastLocation == AL.LOCATION_BAGS or lastLocation == AL.LOCATION_BANK or lastLocation == AL.LOCATION_REAGENT_BANK) then
-            d.locationText = AL.LOCATION_LIMBO
-            d.liveCount = 0
-            d.displayText = "00"
-            d.notesText = ""
-            d.isStale = false
-            charData.lastVerifiedLocation = AL.LOCATION_LIMBO
-            charData.lastVerifiedCount = 0
-            charData.lastVerifiedTimestamp = GetTime()
-            charData.awaitingMailAfterAuctionCancel = false
-        elseif lastLocation and charData.lastVerifiedCount > 0 then
-            d.locationText = lastLocation
-            d.displayText = string.format("%02d", charData.lastVerifiedCount)
-            d.isStale = true
-            d.notesText = ""
-            if d.locationText == AL.LOCATION_MAIL then d.notesText = "Inside mailbox."
-            elseif d.locationText == AL.LOCATION_AUCTION_HOUSE then d.notesText = "Being auctioned."
-            elseif d.locationText == AL.LOCATION_WARBAND_BANK then d.notesText = "Warband Bank (Stale)"
-            elseif d.locationText == AL.LOCATION_REAGENT_BANK then d.notesText = "Reagent Bank (Stale)"
+
+    local isWarbandBankViewable = C_Bank.CanViewBank(Enum.BankType.Account)
+    if isWarbandBankViewable then
+        _G.AL_SavedData.WarbandCache[itemID] = nil
+        local warbandCount = 0
+        if Enum and Enum.BagIndex then
+            for i = 1, AL.MAX_WARBAND_BANK_TABS_TO_CHECK do
+                local bagID = _G["WARBAND_BANK_TAB_"..i.."_BAG_INDEX"] or (Enum.BagIndex["AccountBankTab_"..i])
+                if bagID then
+                    for slot = 1, self:GetSafeContainerNumSlots(bagID) do
+                        local link = self:GetSafeContainerItemLink(bagID, slot)
+                        if link and self:GetItemIDFromLink(link) == itemID then
+                            local itemInfo = self:GetSafeContainerItemInfo(bagID, slot)
+                            if itemInfo and itemInfo.stackCount then
+                                warbandCount = warbandCount + itemInfo.stackCount
+                            end
+                        end
+                    end
+                end
             end
-            if d.locationText == AL.LOCATION_BAGS then d.isLink = true end
-        else
-            d.locationText = AL.LOCATION_LIMBO
-            d.displayText = "00"
-            d.notesText = ""
-            d.isStale = false
-            charData.lastVerifiedLocation = AL.LOCATION_LIMBO
-            charData.lastVerifiedCount = 0
-            charData.lastVerifiedTimestamp = GetTime()
-            charData.awaitingMailAfterAuctionCancel = false
+        end
+        if warbandCount > 0 then
+            _G.AL_SavedData.WarbandCache[itemID] = warbandCount
+            addDetail(AL.LOCATION_WARBAND_BANK, warbandCount, false)
         end
     else
-        d.locationText = d.liveLocation;
-        d.displayText = string.format("%02d", d.liveCount);
-        d.isLink = (d.liveLocation == AL.LOCATION_BAGS);
-        
-        charData.lastVerifiedLocation = d.liveLocation;
-        charData.lastVerifiedCount = d.liveCount;
-        charData.lastVerifiedTimestamp = GetTime();
-        d.notesText = ""; 
-        d.isStale = false; 
-    end
-
-    if d.locationText == AL.LOCATION_BAGS then d.colorR, d.colorG, d.colorB = GetItemQualityColor(charData_in.itemRarity or 1); d.colorA = 1.0;
-    elseif d.locationText == AL.LOCATION_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_BANK_GOLD);
-    elseif d.locationText == AL.LOCATION_MAIL then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_MAIL_TAN);
-    elseif d.locationText == AL.LOCATION_AUCTION_HOUSE then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_AH_BLUE);
-    elseif d.locationText == AL.LOCATION_WARBAND_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_WARBAND_BANK);
-    elseif d.locationText == AL.LOCATION_REAGENT_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_REAGENT_BANK);
-    elseif d.locationText == AL.LOCATION_LIMBO then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_LIMBO);
-    else d.colorR, d.colorG, d.colorB = GetItemQualityColor(charData_in.itemRarity or 1); d.colorA = 1.0; end 
-
-    if d.isStale and d.locationText ~= AL.LOCATION_LIMBO then
-        d.colorR, d.colorG, d.colorB = d.colorR * AL.COLOR_STALE_MULTIPLIER, d.colorG * AL.COLOR_STALE_MULTIPLIER, d.colorB * AL.COLOR_STALE_MULTIPLIER;
+        local cachedCount = _G.AL_SavedData.WarbandCache[itemID]
+        if cachedCount and cachedCount > 0 then
+            addDetail(AL.LOCATION_WARBAND_BANK, cachedCount, true, "Warband Bank (Stale)")
+        end
     end
     
-    return d;
+    local ahCachedCount = _G.AL_SavedData.AuctionCache and _G.AL_SavedData.AuctionCache[itemID]
+    if ahCachedCount and ahCachedCount > 0 then
+        local isAHOpen = AuctionHouseFrame and AuctionHouseFrame:IsShown()
+        addDetail(AL.LOCATION_AUCTION_HOUSE, ahCachedCount, not isAHOpen, not isAHOpen and "Being auctioned." or nil)
+    end
+
+    -- [[ DIRECTIVE: Mail Persistence ]]
+    if charData.awaitingMailCount and charData.awaitingMailCount > 0 then
+        addDetail(AL.LOCATION_MAIL, charData.awaitingMailCount, true, "In transit to mailbox.")
+    end
+
+    if #allDetails == 0 then
+        addDetail(AL.LOCATION_LIMBO, 0, false)
+    end
+    
+    return allDetails
 end
 
 function AL:ProcessAndStoreItem(itemLink)

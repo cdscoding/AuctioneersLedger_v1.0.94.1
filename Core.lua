@@ -154,12 +154,28 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         AL:TriggerDebouncedRefresh(event)
 
     elseif event == "OWNED_AUCTIONS_UPDATED" then
+        -- [[ DIRECTIVE: Auction House Persistence ]]
+        -- This is the central point for keeping track of what the player has on the AH.
+        -- It rebuilds two caches: one for quick cancellation lookups and one for the main ledger display.
         wipe(AL.auctionIDCache)
+        if _G.AL_SavedData and _G.AL_SavedData.AuctionCache then
+            wipe(_G.AL_SavedData.AuctionCache)
+        end
+
         local liveAuctions = C_AuctionHouse.GetOwnedAuctions()
         if liveAuctions then
             for _, auctionEntry in ipairs(liveAuctions) do
                 if auctionEntry.auctionID and auctionEntry.itemKey and auctionEntry.itemKey.itemID then
-                    AL.auctionIDCache[auctionEntry.auctionID] = { itemID = auctionEntry.itemKey.itemID, quantity = auctionEntry.quantity, itemLink = auctionEntry.itemLink }
+                    local itemID = auctionEntry.itemKey.itemID
+                    local quantity = auctionEntry.quantity or 0
+                    
+                    -- Cache for cancellations (by auctionID)
+                    AL.auctionIDCache[auctionEntry.auctionID] = { itemID = itemID, quantity = quantity, itemLink = auctionEntry.itemLink }
+                    
+                    -- Cache for ledger display (aggregated by itemID)
+                    if _G.AL_SavedData.AuctionCache then
+                        _G.AL_SavedData.AuctionCache[itemID] = (_G.AL_SavedData.AuctionCache[itemID] or 0) + quantity
+                    end
                 end
             end
         end
@@ -184,8 +200,17 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         if AL.isPosting and AL.itemBeingPosted then AL:HandlePostSuccess() end
         
     elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+        -- [[ DIRECTIVE: Mail Persistence ]]
+        -- When a commodity is purchased, it goes to the mail. Flag it immediately.
         local itemID, quantity, price = ...
         if not itemID then return end
+        
+        local charKey = UnitName("player") .. "-" .. GetRealmName()
+        if _G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey] then
+            local charData = _G.AL_SavedData.Items[itemID].characters[charKey]
+            charData.awaitingMailCount = (charData.awaitingMailCount or 0) + quantity
+        end
+
         C_Timer.After(2.0, function()
             local itemName, itemLink = GetItemInfo(itemID)
             if itemLink then AL:ProcessPurchase(itemName, itemLink, quantity, price) end
