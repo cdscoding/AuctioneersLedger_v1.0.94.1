@@ -193,12 +193,12 @@ function AL:CreateSupportWindow()
     local frameNameSuffix = "_v" .. AL.VERSION:gsub("%.","_")
     local sw = CreateFrame("Frame", "AL_SupportWindow" .. frameNameSuffix, UIParent, "BasicFrameTemplateWithInset")
     self.SupportWindow = sw
-    sw:SetSize(420, 320) -- Resized for new content
+    sw:SetSize(420, 480) -- Increased height for Discord info
     sw:SetFrameStrata("DIALOG")
     local mainWinLevel = self.MainWindow and self.MainWindow:GetFrameLevel() or 5
     sw:SetFrameLevel(mainWinLevel + 5)
-    -- [[ DIRECTIVE: Change Title to Patreon ]]
-    sw.TitleText:SetText("Support on Patreon")
+    -- [[ DIRECTIVE: Change Title ]]
+    sw.TitleText:SetText("Support & Community")
     sw:SetMovable(true)
     sw:RegisterForDrag("LeftButton")
     sw:SetScript("OnDragStart", function(self) self:StartMoving() end)
@@ -206,41 +206,62 @@ function AL:CreateSupportWindow()
     sw:SetClampedToScreen(true)
     sw.CloseButton:SetScript("OnClick", function() self:HideSupportWindow() end)
 
-    -- [[ DIRECTIVE: Add Patreon Logo ]]
-    local logo = sw:CreateTexture(nil, "ARTWORK")
-    logo:SetSize(256, 64) -- Estimated size
-    logo:SetTexture(AL.PATREON_LOGO_PATH)
-    logo:SetPoint("TOP", sw, "TOP", 0, -40)
+    -- [[ DIRECTIVE: Add Discord Logo ]]
+    local discordLogo = sw:CreateTexture(nil, "ARTWORK")
+    discordLogo:SetSize(256, 85) -- Adjusted size for Discord logo
+    discordLogo:SetTexture(AL.DISCORD_LOGO_PATH)
+    discordLogo:SetPoint("TOP", sw, "TOP", 0, -40)
+
+    -- Discord link EditBox
+    local discordLinkBox = CreateFrame("EditBox", "AL_DiscordLinkBox" .. frameNameSuffix, sw, "InputBoxTemplate")
+    discordLinkBox:SetPoint("TOP", discordLogo, "BOTTOM", 0, -10)
+    discordLinkBox:SetSize(sw:GetWidth() - 60, 30)
+    discordLinkBox:SetText("https://discord.gg/5TfC7ey3Te")
+    discordLinkBox:SetAutoFocus(false)
+    discordLinkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    discordLinkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    discordLinkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+
+    -- Instruction label for copying Discord link
+    local discordInstructionLabel = sw:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    discordInstructionLabel:SetPoint("TOP", discordLinkBox, "BOTTOM", 0, -5)
+    discordInstructionLabel:SetTextColor(1, 0.82, 0, 1) -- Yellowish color
+    discordInstructionLabel:SetText("Press Ctrl+C to copy the URL for bug reports and community chat.")
+
+    -- [[ DIRECTIVE: Add Patreon Logo, positioned below Discord info ]]
+    local patreonLogo = sw:CreateTexture(nil, "ARTWORK")
+    patreonLogo:SetSize(256, 64)
+    patreonLogo:SetTexture(AL.PATREON_LOGO_PATH)
+    patreonLogo:SetPoint("TOP", discordInstructionLabel, "BOTTOM", 0, -20)
 
     -- Main message FontString
     local messageFS = sw:CreateFontString("AL_SupportMessageFS" .. frameNameSuffix, "ARTWORK", "GameFontNormal")
-    messageFS:SetPoint("TOP", logo, "BOTTOM", 0, -15)
+    messageFS:SetPoint("TOP", patreonLogo, "BOTTOM", 0, -15)
     messageFS:SetWidth(sw:GetWidth() - 40)
     messageFS:SetJustifyH("CENTER")
     messageFS:SetJustifyV("TOP")
     messageFS:SetTextColor(unpack(AL.COLOR_BANK_GOLD))
-    -- [[ DIRECTIVE: Updated the support message text ]]
     messageFS:SetText("Auctioneer's Ledger is a passion project that takes hundreds of hours to develop and maintain. If you find the addon valuable and want to support its continued development, please consider becoming a patron!")
 
     -- Donation link EditBox
-    local linkBox = CreateFrame("EditBox", "AL_SupportLinkBox" .. frameNameSuffix, sw, "InputBoxTemplate")
-    linkBox:SetPoint("TOP", messageFS, "BOTTOM", 0, -15)
-    linkBox:SetSize(sw:GetWidth() - 60, 30)
-    -- [[ DIRECTIVE: Update URL to Patreon ]]
-    linkBox:SetText("https://www.patreon.com/csasoftware")
-    linkBox:SetAutoFocus(false)
-    linkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    linkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    local patreonLinkBox = CreateFrame("EditBox", "AL_SupportLinkBox" .. frameNameSuffix, sw, "InputBoxTemplate")
+    patreonLinkBox:SetPoint("TOP", messageFS, "BOTTOM", 0, -15)
+    patreonLinkBox:SetSize(sw:GetWidth() - 60, 30)
+    patreonLinkBox:SetText("https://www.patreon.com/csasoftware")
+    patreonLinkBox:SetAutoFocus(false)
+    patreonLinkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    patreonLinkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    patreonLinkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
 
-    -- Instruction label for copying
-    local instructionLabel = sw:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    instructionLabel:SetPoint("TOP", linkBox, "BOTTOM", 0, -5)
-    instructionLabel:SetTextColor(1, 0.82, 0, 1) -- Yellowish color
-    instructionLabel:SetText("Press Ctrl+C to copy the URL.")
+    -- Instruction label for copying Patreon link
+    local patreonInstructionLabel = sw:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    patreonInstructionLabel:SetPoint("TOP", patreonLinkBox, "BOTTOM", 0, -5)
+    patreonInstructionLabel:SetTextColor(1, 0.82, 0, 1) -- Yellowish color
+    patreonInstructionLabel:SetText("Press Ctrl+C to copy the URL.")
 
     sw:Hide()
 end
+
 
 -- Shows the support window
 function AL:ShowSupportWindow()
