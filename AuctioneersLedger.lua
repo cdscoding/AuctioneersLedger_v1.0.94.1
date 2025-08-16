@@ -1,4 +1,4 @@
--- Auctioneer's Ledger - v1.0.93 - Created by Clint Seewald (CS&A-Software)
+-- Auctioneer's Ledger - v1.0.94 - Created by Clint Seewald (CS&A-Software)
 -- This file creates the main addon table and initializes all addon-wide variables.
 
 -- Create the main addon table if it doesn't exist
@@ -11,7 +11,7 @@ AL.LDB_PREFIX = "AuctioneersLedgerDB"
 AL.ADDON_MSG_PREFIX = "AL_MSG"
 
 -- Set the addon version
-AL.VERSION = "1.0.93"
+AL.VERSION = "1.0.94"
 
 -- This is the root of the addon's database.
 _G.AL_SavedData = _G.AL_SavedData or {}
@@ -89,6 +89,7 @@ AL.HelpWindowScrollFrame = nil
 AL.HelpWindowScrollChild = nil
 AL.HelpWindowFontString = nil
 AL.SupportWindow = nil
+AL.WelcomeWindow = nil -- [[ DIRECTIVE: Add Welcome Window ]]
 AL.BlasterWindow = nil
 AL.testSetScriptControlDone = false
 AL.mainDividers = AL.mainDividers or {}
@@ -139,6 +140,10 @@ function AL:NukeLedgerAndHistory()
         -- Also clear caches that depend on this data
         if _G.AL_SavedData.Settings and _G.AL_SavedData.Settings.itemExpansionStates then
             _G.AL_SavedData.Settings.itemExpansionStates = {}
+        end
+        -- [[ DIRECTIVE: Reset welcome window on nuke ]]
+        if _G.AL_SavedData.Settings then
+            _G.AL_SavedData.Settings.showWelcomeWindowOnLogin = true
         end
     end
 

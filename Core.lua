@@ -104,6 +104,15 @@ function AL:HandlePlayerEnteringWorld()
     AL.gameFullyInitialized = true
     C_Timer.After(2.0, function() if C_AuctionHouse.IsThrottledMessageSystemReady() then C_AuctionHouse.QueryOwnedAuctions({}) end end)
     if self.MainWindow and self.MainWindow:IsShown() then self:RefreshLedgerDisplay() end
+
+    -- [[ DIRECTIVE: Show Welcome Window on Login ]]
+    C_Timer.After(1.5, function() -- Short delay to let the UI settle
+        if _G.AL_SavedData and _G.AL_SavedData.Settings then
+            if _G.AL_SavedData.Settings.showWelcomeWindowOnLogin == nil or _G.AL_SavedData.Settings.showWelcomeWindowOnLogin == true then
+                AL:ShowWelcomeWindow()
+            end
+        end
+    end)
 end
 
 local eventHandlerFrame = CreateFrame("Frame", "AL_EventHandler_v" .. AL.VERSION:gsub("%.","_"))

@@ -262,7 +262,6 @@ function AL:CreateSupportWindow()
     sw:Hide()
 end
 
-
 -- Shows the support window
 function AL:ShowSupportWindow()
     if not self.SupportWindow then self:CreateSupportWindow() end
@@ -282,6 +281,125 @@ end
 function AL:ToggleSupportWindow()
     if not self.SupportWindow or not self.SupportWindow:IsShown() then self:ShowSupportWindow()
     else self:HideSupportWindow() end
+end
+
+-- [[ DIRECTIVE: Create Welcome Window ]]
+function AL:CreateWelcomeWindow()
+    if self.WelcomeWindow then return end
+    local frameNameSuffix = "_v" .. AL.VERSION:gsub("%.","_")
+    local ww = CreateFrame("Frame", "AL_WelcomeWindow" .. frameNameSuffix, UIParent, "BasicFrameTemplateWithInset")
+    self.WelcomeWindow = ww
+    ww:SetSize(480, 580) -- A bit wider and taller to fit all content
+    ww:SetFrameStrata("DIALOG")
+    ww:SetFrameLevel(20)
+    ww.TitleText:SetText("Welcome to Auctioneer's Ledger!")
+    ww:SetMovable(true)
+    ww:RegisterForDrag("LeftButton")
+    ww:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    ww:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    ww:SetClampedToScreen(true)
+    ww.CloseButton:SetScript("OnClick", function() self:HideWelcomeWindow() end)
+
+    local currentY = -40
+
+    -- Tutorial Section
+    local tutorialHeader = ww:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    tutorialHeader:SetPoint("TOP", ww, "TOP", 0, currentY)
+    tutorialHeader:SetTextColor(1, 0.82, 0, 1)
+    tutorialHeader:SetText("Getting Started")
+    currentY = currentY - 25
+
+    local tutorialText = ww:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    tutorialText:SetPoint("TOP", tutorialHeader, "BOTTOM", 0, -10)
+    tutorialText:SetWidth(ww:GetWidth() - 40)
+    tutorialText:SetJustifyH("LEFT")
+    tutorialText:SetText("• To open the main window, type |cffffd100/al|r or |cffffd100/aledger|r in chat, or click the minimap icon.\n\n• To track an item, click the '|cffffd100Track New Item|r' button in the ledger and drag an item from your bags onto the popup.")
+    currentY = currentY - tutorialText:GetHeight() - 20
+
+    -- Divider
+    local divider = ww:CreateTexture(nil, "ARTWORK")
+    divider:SetPoint("TOPLEFT", ww, "TOPLEFT", 20, currentY)
+    divider:SetPoint("TOPRIGHT", ww, "TOPRIGHT", -20, currentY)
+    divider:SetHeight(1)
+    divider:SetColorTexture(0.5, 0.5, 0.5, 0.5)
+    currentY = currentY - 20
+
+    -- Support & Community Section (copied and adapted from CreateSupportWindow)
+    local discordLogo = ww:CreateTexture(nil, "ARTWORK")
+    discordLogo:SetSize(256, 85)
+    discordLogo:SetTexture(AL.DISCORD_LOGO_PATH)
+    discordLogo:SetPoint("TOP", ww, "TOP", 0, currentY)
+    currentY = currentY - 85 - 10
+
+    local discordLinkBox = CreateFrame("EditBox", "AL_WelcomeDiscordLinkBox" .. frameNameSuffix, ww, "InputBoxTemplate")
+    discordLinkBox:SetPoint("TOP", ww, "TOP", 0, currentY)
+    discordLinkBox:SetSize(ww:GetWidth() - 80, 30)
+    discordLinkBox:SetText("https://discord.gg/5TfC7ey3Te")
+    discordLinkBox:SetAutoFocus(false)
+    discordLinkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    discordLinkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    discordLinkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    currentY = currentY - 30 - 5
+
+    local discordInstructionLabel = ww:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    discordInstructionLabel:SetPoint("TOP", ww, "TOP", 0, currentY)
+    discordInstructionLabel:SetTextColor(1, 0.82, 0, 1)
+    discordInstructionLabel:SetText("Press Ctrl+C to copy the URL for bug reports and community chat.")
+    currentY = currentY - 15 - 20
+
+    local patreonLogo = ww:CreateTexture(nil, "ARTWORK")
+    patreonLogo:SetSize(256, 64)
+    patreonLogo:SetTexture(AL.PATREON_LOGO_PATH)
+    patreonLogo:SetPoint("TOP", ww, "TOP", 0, currentY)
+    currentY = currentY - 64 - 15
+
+    local messageFS = ww:CreateFontString("AL_WelcomeSupportMessageFS" .. frameNameSuffix, "ARTWORK", "GameFontNormal")
+    messageFS:SetPoint("TOP", ww, "TOP", 0, currentY)
+    messageFS:SetWidth(ww:GetWidth() - 40)
+    messageFS:SetJustifyH("CENTER")
+    messageFS:SetTextColor(unpack(AL.COLOR_BANK_GOLD))
+    messageFS:SetText("Auctioneer's Ledger is a passion project that takes hundreds of hours to develop and maintain. If you find the addon valuable and want to support its continued development, please consider becoming a patron!")
+    currentY = currentY - messageFS:GetHeight() - 15
+
+    local patreonLinkBox = CreateFrame("EditBox", "AL_WelcomeSupportLinkBox" .. frameNameSuffix, ww, "InputBoxTemplate")
+    patreonLinkBox:SetPoint("TOP", ww, "TOP", 0, currentY)
+    patreonLinkBox:SetSize(ww:GetWidth() - 80, 30)
+    patreonLinkBox:SetText("https://www.patreon.com/csasoftware")
+    patreonLinkBox:SetAutoFocus(false)
+    patreonLinkBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    patreonLinkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    patreonLinkBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    currentY = currentY - 30 - 5
+
+    local patreonInstructionLabel = ww:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    patreonInstructionLabel:SetPoint("TOP", ww, "TOP", 0, currentY)
+    patreonInstructionLabel:SetTextColor(1, 0.82, 0, 1)
+    patreonInstructionLabel:SetText("Press Ctrl+C to copy the URL.")
+
+    -- "Do not show again" Checkbox
+    local dontShowCheck = CreateFrame("CheckButton", "AL_DontShowWelcomeCheck" .. frameNameSuffix, ww, "UICheckButtonTemplate")
+    dontShowCheck:SetPoint("BOTTOMLEFT", ww, "BOTTOMLEFT", 15, 15)
+    _G[dontShowCheck:GetName() .. "Text"]:SetText("Do not show this again")
+    dontShowCheck:SetScript("OnClick", function(self)
+        if _G.AL_SavedData and _G.AL_SavedData.Settings then
+            _G.AL_SavedData.Settings.showWelcomeWindowOnLogin = not self:GetChecked()
+        end
+    end)
+    
+    ww:Hide()
+end
+
+function AL:ShowWelcomeWindow()
+    if not self.WelcomeWindow then self:CreateWelcomeWindow() end
+    if not self.WelcomeWindow then return end
+    self.WelcomeWindow:ClearAllPoints()
+    self.WelcomeWindow:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    self.WelcomeWindow:Show()
+    self.WelcomeWindow:Raise()
+end
+
+function AL:HideWelcomeWindow()
+    if self.WelcomeWindow and self.WelcomeWindow:IsShown() then self.WelcomeWindow:Hide() end
 end
 
 -- Populates the text content of the help window

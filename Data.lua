@@ -113,6 +113,7 @@ function AL:InitializeDB()
         itemExpansionStates = {},
         activeViewMode = AL.VIEW_WARBAND_STOCK,
         dbVersion = 9,
+        showWelcomeWindowOnLogin = true, -- [[ DIRECTIVE: Add setting for welcome window ]]
         filterSettings = {
             [AL.VIEW_WARBAND_STOCK]     = { sort = AL.SORT_ALPHA, quality = nil, stack = nil, view = "GROUPED_BY_ITEM"},
             [AL.VIEW_AUCTION_FINANCES]  = { sort = AL.SORT_ITEM_NAME_FLAT, quality = nil, stack = nil, view = "FLAT_LIST"},

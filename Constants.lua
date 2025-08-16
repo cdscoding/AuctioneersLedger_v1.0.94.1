@@ -1,6 +1,6 @@
 -- Auctioneer's Ledger - Constants
 -- This file contains all the static configuration values for the addon.
-AL.VERSION = "1.0.93" 
+AL.VERSION = "1.0.94" 
 
 -- Core numerical constants (independent)
 AL.COL_PADDING = 5
