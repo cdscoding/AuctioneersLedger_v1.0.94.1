@@ -1,6 +1,6 @@
 -- Auctioneer's Ledger - Constants
 -- This file contains all the static configuration values for the addon.
-AL.VERSION = "1.0.94.1" 
+AL.VERSION = "1.2.01" 
 
 -- Core numerical constants (independent)
 AL.COL_PADDING = 5
@@ -19,7 +19,6 @@ AL.POPUP_OFFSET_X = 10
 AL.ITEM_ROW_HEIGHT = 22
 AL.COLUMN_HEADER_HEIGHT = 20
 AL.EVENT_DEBOUNCE_TIME = 0.75
-AL.PERIODIC_REFRESH_INTERVAL = 7.0
 AL.MAIL_REFRESH_DELAY = 0.25
 AL.MAX_MAIL_ATTACHMENTS_TO_SCAN = 12
 AL.STALE_DATA_THRESHOLD = 300

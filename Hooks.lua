@@ -9,14 +9,17 @@ AL.pendingItem = nil
 AL.pendingCost = nil
 AL.isPrintingFromAddon = false
 
-function AL:HandleOnUpdate(frame, elapsed)
+-- This function is now called only when a tooltip is shown, not every frame.
+function AL:HandleTooltipShow()
     if GameTooltip:IsVisible() then
         local name, link = GameTooltip:GetItem()
         if name and link then
-            if #AL.recentlyViewedItems > 0 and AL.recentlyViewedItems[#AL.recentlyViewedItems].name == name then
+            -- Avoid adding the same item repeatedly if the tooltip flickers
+            if #AL.recentlyViewedItems > 0 and AL.recentlyViewedItems[#AL.recentlyViewedItems].link == link then
                 return
             end
             table.insert(AL.recentlyViewedItems, {name = name, link = link})
+            -- Keep the cache from growing too large
             if #AL.recentlyViewedItems > 20 then
                 table.remove(AL.recentlyViewedItems, 1)
             end
@@ -109,20 +112,49 @@ function AL:BuildSalesCache()
     end
 end
 
-function AL:ProcessInboxForSales()
+-- [[ DIRECTIVE: Mail Lag Fix ]]
+-- This new function combines the logic of UpdateMailCache and ProcessInboxForSales.
+-- It loops through the inbox only ONCE to perform both actions, significantly improving performance.
+function AL:ProcessMailboxUpdate()
+    -- Part 1: Update Mail Cache (formerly UpdateMailCache)
+    local charKey = UnitName("player") .. "-" .. GetRealmName()
+    if not _G.AL_SavedData.MailCache then _G.AL_SavedData.MailCache = {} end
+    
+    local mailCounts = {}
+    local numMailItems = GetInboxNumItems and GetInboxNumItems() or 0
+    
+    if numMailItems > 0 then
+        for i = 1, numMailItems do
+            if select(8, GetInboxHeaderInfo(i)) then -- hasItem
+                for j = 1, AL.MAX_MAIL_ATTACHMENTS_TO_SCAN do
+                    local link = GetInboxItemLink(i, j)
+                    if link then
+                        local itemID = AL:GetItemIDFromLink(link)
+                        if itemID and _G.AL_SavedData.Items[itemID] then
+                            local _, _, _, itemCount = GetInboxItem(i, j)
+                            mailCounts[itemID] = (mailCounts[itemID] or 0) + (itemCount or 0)
+                        end
+                    else
+                        break
+                    end
+                end
+            end
+        end
+    end
+    _G.AL_SavedData.MailCache[charKey] = mailCounts
+    
+    -- Part 2: Process Sales (formerly ProcessInboxForSales)
     self:BuildSalesCache()
 
-    local numItems = GetInboxNumItems()
-    if numItems == 0 then return end
+    if numMailItems == 0 then return end
     
-    local charKey = UnitName("player") .. "-" .. GetRealmName()
     local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
     local itemsByName = self.salesItemCache
     local pendingByID = self.salesPendingAuctionCache
     local didUpdate = false
     local indicesToRemove = {}
 
-    for i = 1, numItems do
+    for i = 1, numMailItems do
         local _, _, sender, subject, money, _, _, _, _, _, textCreated = GetInboxHeaderInfo(i)
         local invoiceType, itemNameFromInvoice = GetInboxInvoiceInfo(i)
         local mailKey = sender .. subject .. tostring(money) .. tostring(textCreated or 0) .. tostring(itemNameFromInvoice or "")
@@ -217,10 +249,11 @@ end
 function AL:InitializeCoreHooks()
     if self.coreHooksInitialized then return end
     hooksecurefunc(ChatFrame1, "AddMessage", function(...) AL:HandlePurchaseMessage(...) end)
-    local eventHandler = _G["AL_EventHandler_v" .. AL.VERSION:gsub("%.","_")]
-    if eventHandler then
-        eventHandler:SetScript("OnUpdate", function(...) AL:HandleOnUpdate(...) end)
-    end
+    
+    -- PERFORMANCE FIX: Replaced the OnUpdate script with a more efficient OnShow hook.
+    -- This captures the same item data from tooltips but only runs when a tooltip appears, not every frame.
+    GameTooltip:HookScript("OnShow", function() AL:HandleTooltipShow() end)
+
     hooksecurefunc("TakeInboxItem", function(mailIndex, attachmentIndex)
         local itemLink = GetInboxItemLink(mailIndex, attachmentIndex)
         if not itemLink then return end
@@ -228,11 +261,15 @@ function AL:InitializeCoreHooks()
         local itemID = AL:GetItemIDFromLink(itemLink)
         if not itemID then return end
         
+        -- [[ DIRECTIVE: Mail Persistence ]]
+        -- Update the new MailCache when an item is taken.
         local charKey = UnitName("player") .. "-" .. GetRealmName()
-        if _G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey] then
-            local charData = _G.AL_SavedData.Items[itemID].characters[charKey]
+        if _G.AL_SavedData.MailCache and _G.AL_SavedData.MailCache[charKey] and _G.AL_SavedData.MailCache[charKey][itemID] then
             local _, _, _, itemCount = GetInboxItem(mailIndex, attachmentIndex)
-            charData.awaitingMailCount = math.max(0, (charData.awaitingMailCount or 0) - (itemCount or 0))
+            _G.AL_SavedData.MailCache[charKey][itemID] = math.max(0, _G.AL_SavedData.MailCache[charKey][itemID] - (itemCount or 0))
+            if _G.AL_SavedData.MailCache[charKey][itemID] == 0 then
+                _G.AL_SavedData.MailCache[charKey][itemID] = nil
+            end
         end
 
         local _, _, _, subject = GetInboxHeaderInfo(mailIndex)
@@ -257,6 +294,9 @@ function AL:InitializeCoreHooks()
                 end
             end
         end
+        -- [[ DIRECTIVE: Reactive Refresh ]]
+        -- Trigger a refresh after taking an item to update the UI immediately.
+        AL:TriggerDebouncedRefresh("MAIL_ITEM_TAKEN")
     end)
     self.coreHooksInitialized = true
 end
@@ -290,12 +330,12 @@ function AL:InitializeAuctionHooks()
             if not cachedInfo or not cachedInfo.itemID then return end
             
             -- [[ DIRECTIVE: Mail Persistence ]]
-            -- Flag the item as being in transit to the mailbox.
+            -- Flag the item as being in transit by adding it to the MailCache.
             local charKey = UnitName("player") .. "-" .. GetRealmName()
-            if _G.AL_SavedData.Items and _G.AL_SavedData.Items[cachedInfo.itemID] and _G.AL_SavedData.Items[cachedInfo.itemID].characters[charKey] then
-                local charData = _G.AL_SavedData.Items[cachedInfo.itemID].characters[charKey]
-                charData.awaitingMailCount = (charData.awaitingMailCount or 0) + cachedInfo.quantity
-            end
+            if not _G.AL_SavedData.MailCache then _G.AL_SavedData.MailCache = {} end
+            if not _G.AL_SavedData.MailCache[charKey] then _G.AL_SavedData.MailCache[charKey] = {} end
+
+            _G.AL_SavedData.MailCache[charKey][cachedInfo.itemID] = (_G.AL_SavedData.MailCache[charKey][cachedInfo.itemID] or 0) + cachedInfo.quantity
 
             local pendingAuctions = _G.AL_SavedData.PendingAuctions and _G.AL_SavedData.PendingAuctions[charKey]
             if pendingAuctions then
@@ -333,11 +373,22 @@ function AL:InitializeVendorHooks()
         if isTracked then
             AL:RecordTransaction("BUY", "VENDOR", itemID, price, quantity)
         else
-            local name = GetItemInfo(itemLink)
-            if not name then return end
-
-            local popupData = { itemLink = itemLink, itemID = itemID, price = price, quantity = quantity }
-            StaticPopup_Show("AL_CONFIRM_TRACK_NEW_VENDOR_PURCHASE", name, nil, popupData)
+            -- [[ NEW: Check setting before showing popup ]]
+            if _G.AL_SavedData and _G.AL_SavedData.Settings and _G.AL_SavedData.Settings.autoAddNewItems then
+                -- Bypass popup and add automatically
+                local success, msg = AL:InternalAddItem(itemLink, UnitName("player"), GetRealmName())
+                if success then
+                    -- Now that the item is tracked, record the transaction that triggered this.
+                    AL:RecordTransaction("BUY", "VENDOR", itemID, price, quantity)
+                    AL:RefreshLedgerDisplay()
+                end
+            else
+                -- Show confirmation popup
+                local name = GetItemInfo(itemLink)
+                if not name then return end
+                local popupData = { itemLink = itemLink, itemID = itemID, price = price, quantity = quantity }
+                StaticPopup_Show("AL_CONFIRM_TRACK_NEW_VENDOR_PURCHASE", name, nil, popupData)
+            end
         end
     end
 
@@ -410,3 +461,4 @@ function AL:GetItemIDFromLink(itemLink)
     if not itemLink then return nil end
     return tonumber(itemLink:match("item:(%d+)"))
 end
+

@@ -15,6 +15,7 @@ function AL:CreateFrames()
         self.WarbandStockTab, self.AuctionFinancesTab, self.VendorFinancesTab, self.AuctionPricingTab, self.AuctionSettingsTab = nil, nil, nil, nil, nil
         -- [[ ADDED Nuke buttons to reset list ]]
         self.NukeLedgerButton, self.NukeHistoryButton = nil, nil
+        self.AutoAddNewItemsCheckButton = nil -- [[ NEW: Add checkbox to reset list ]]
         self.SortAlphaButton, self.SortItemNameFlatButton, self.SortBagsButton, self.SortBankButton, self.SortMailButton, self.SortAuctionButton, self.SortLimboButton, self.SortWarbandBankButton, self.SortReagentBankButton = nil,nil,nil,nil,nil,nil,nil,nil,nil,nil
         self.SortCharacterButton, self.SortRealmButton = nil, nil
         self.LabelSortBy, self.LabelFilterLocation, self.LabelFilterQuality, self.LabelFilterLedger, self.LabelFilterStackability = nil, nil, nil, nil, nil
@@ -57,6 +58,14 @@ function AL:CreateFrames()
     self.NukeHistoryButton = CreateFrame("Button", "AL_NukeHistoryButton" .. frameNameSuffix, f, "UIPanelButtonTemplate")
     self.NukeHistoryButton:SetText("Nuke History")
     self.NukeHistoryButton:SetScript("OnClick", function() StaticPopup_Show("AL_CONFIRM_NUKE_HISTORY") end)
+
+    -- [[ NEW: Create the Auto-Add checkbox ]]
+    self.AutoAddNewItemsCheckButton = CreateFrame("CheckButton", "AL_AutoAddNewItemsCheckButton" .. frameNameSuffix, f, "UICheckButtonTemplate")
+    _G["AL_AutoAddNewItemsCheckButton" .. frameNameSuffix.."Text"]:SetText("Auto add new vendor or auction items.")
+    self.AutoAddNewItemsCheckButton:SetScript("OnClick", function(self)
+        if not _G.AL_SavedData.Settings then _G.AL_SavedData.Settings = {} end
+        _G.AL_SavedData.Settings.autoAddNewItems = self:GetChecked()
+    end)
 
     local lp=CreateFrame("Frame","AL_LeftPanel" .. frameNameSuffix,self.MainWindow)
     self.LeftPanel=lp
@@ -143,3 +152,4 @@ function AL:CreateFrames()
     sc:SetSize(100,10)
     sf:SetScrollChild(sc)
 end
+

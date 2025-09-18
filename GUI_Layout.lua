@@ -109,6 +109,14 @@ function AL:UpdateLayout()
         self.NukeLedgerButton:SetPoint("TOPRIGHT", self.NukeHistoryButton, "TOPLEFT", -AL.BUTTON_SPACING, 0)
     end
 
+    -- [[ NEW: Position the Auto-Add checkbox ]]
+    if self.AutoAddNewItemsCheckButton then
+        self.AutoAddNewItemsCheckButton:SetPoint("RIGHT", self.NukeLedgerButton, "LEFT", -200, 0)
+        -- Set its checked state from saved variables
+        local shouldBeChecked = _G.AL_SavedData.Settings and _G.AL_SavedData.Settings.autoAddNewItems
+        self.AutoAddNewItemsCheckButton:SetChecked(shouldBeChecked)
+    end
+
     local contentTopY = tabTop + AL.TAB_BUTTON_HEIGHT + AL.COL_PADDING + AL.MAIN_CONTENT_VERTICAL_OFFSET_ADJUSTMENT
 
     if self.LeftPanel then
@@ -294,3 +302,4 @@ function AL:UpdateLayout()
     end
     for i = #divX_centers_abs, #self.mainDividers do if self.mainDividers[i] then self.mainDividers[i]:Hide() end end
 end
+

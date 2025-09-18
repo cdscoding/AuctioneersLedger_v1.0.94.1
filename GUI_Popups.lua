@@ -497,30 +497,9 @@ function AL:PopulateHelpWindowText()
     self.HelpWindowScrollChild:SetHeight(math.max(scrollFrameHeight - 10, fsHeight + 20)) end end)
 end
 
--- Controls periodic refreshes based on active tab.
-function AL:StartStopPeriodicRefresh()
-    if not self.MainWindow or not self.MainWindow:IsShown() or self.currentActiveTab == AL.VIEW_AUCTION_PRICING or self.currentActiveTab == AL.VIEW_AUCTION_SETTINGS then
-        if self.periodicRefreshTimer then
-            self.periodicRefreshTimer:Cancel()
-            self.periodicRefreshTimer = nil
-        end
-        return
-    end
-
-    if not self.periodicRefreshTimer then
-        local interval = tonumber(AL.PERIODIC_REFRESH_INTERVAL) or 7.0
-        if type(interval) ~= "number" or interval <= 0 then interval = 7.0 end
-        self.periodicRefreshTimer = C_Timer.NewTicker(interval, function()
-            if self.MainWindow and self.MainWindow:IsShown() and self.currentActiveTab ~= AL.VIEW_AUCTION_PRICING and self.currentActiveTab ~= AL.VIEW_AUCTION_SETTINGS then
-                self:RefreshLedgerDisplay()
-            else
-                if self.periodicRefreshTimer then self.periodicRefreshTimer:Cancel() end
-                self.periodicRefreshTimer = nil
-            end
-        end)
-    end
-end
-
+-- [[ DIRECTIVE: Remove Periodic Timer ]]
+-- This function is now removed. All refreshes are event-driven.
+-- function AL:StartStopPeriodicRefresh() ... end
 
 -- Applies the saved window state (position, size, visibility)
 function AL:ApplyWindowState() 
@@ -545,13 +524,15 @@ function AL:ApplyWindowState()
     
     if settings.visible then 
         AL.MainWindow:Show()
+        -- [[ DIRECTIVE: Reactive Refresh ]]
+        -- Refresh the display when the window is shown.
+        self:RefreshLedgerDisplay()
     else 
         AL.MainWindow:Hide()
         AL:HideReminderPopup()
         AL:HideHelpWindow()
         AL:HideSupportWindow()
     end
-    AL:StartStopPeriodicRefresh()
 end
 
 -- Toggles the main window's visibility
@@ -587,7 +568,6 @@ function AL:ToggleMainWindow()
         end
         AL:ApplyWindowState()
     end
-    AL:StartStopPeriodicRefresh()
 end
 
 -- Define StaticPopupDialogs for confirmation dialogs
@@ -632,7 +612,7 @@ StaticPopupDialogs["AL_CONFIRM_TRACK_NEW_PURCHASE"] = {
     button2 = "No, Ignore",
     OnAccept = function(self, data)
         if data and data.itemLink and data.itemID and data.price and data.quantity then
-            local success, msg = AL:InternalAddItem(data.itemLink, UnitName("player"), GetRealmName())
+            local success, msg = AL:InternalAddItem(data.itemLink, UnitName("player"), GetRealmName(), data.sourceDetails)
             if success then
                 -- [[ FIX: Retroactively record the transaction that triggered this popup ]]
                 AL:RecordTransaction("BUY", "AUCTION", data.itemID, data.price, data.quantity)
@@ -732,3 +712,4 @@ StaticPopupDialogs["AL_CONFIRM_CANCEL_UNDERCUT"] = {
     hideOnEscape = true,
     preferredIndex = 3,
 }
+

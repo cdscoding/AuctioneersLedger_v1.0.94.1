@@ -107,13 +107,48 @@ function AL:InitializeDB()
         _G.AL_SavedData.Settings.dbVersion = 9
     end
 
+    -- [[ DIRECTIVE: Memory Optimization - Data Restructuring ]]
+    -- This migration removes redundant itemLink and itemRarity from every character entry.
+    if _G.AL_SavedData.Settings.dbVersion < 10 then
+        if _G.AL_SavedData.Items then
+            for itemID, itemData in pairs(_G.AL_SavedData.Items) do
+                if itemData and itemData.characters then
+                    for charKey, charData in pairs(itemData.characters) do
+                        -- These are redundant and bloat the saved variables file.
+                        -- The parent itemData already has the correct values.
+                        charData.itemLink = nil
+                        charData.itemRarity = nil
+                    end
+                end
+            end
+        end
+        _G.AL_SavedData.Settings.dbVersion = 10
+    end
+
+    -- [[ DIRECTIVE: Mail Persistence - Migration ]]
+    -- This migration removes the old awaitingMailCount field, which is now replaced by the MailCache.
+    if _G.AL_SavedData.Settings.dbVersion < 11 then
+        if _G.AL_SavedData.Items then
+            for itemID, itemData in pairs(_G.AL_SavedData.Items) do
+                if itemData and itemData.characters then
+                    for charKey, charData in pairs(itemData.characters) do
+                        charData.awaitingMailCount = nil
+                    end
+                end
+            end
+        end
+        _G.AL_SavedData.Settings.dbVersion = 11
+    end
+
+
     local defaultSettings = {
         window = {x=nil,y=nil,width=AL.DEFAULT_WINDOW_WIDTH,height=AL.DEFAULT_WINDOW_HEIGHT,visible=true},
         minimapIcon = {},
         itemExpansionStates = {},
         activeViewMode = AL.VIEW_WARBAND_STOCK,
-        dbVersion = 9,
+        dbVersion = 11, -- Updated to latest version
         showWelcomeWindowOnLogin = true, -- [[ DIRECTIVE: Add setting for welcome window ]]
+        autoAddNewItems = false, -- [[ NEW: Setting for auto-adding items ]]
         filterSettings = {
             [AL.VIEW_WARBAND_STOCK]     = { sort = AL.SORT_ALPHA, quality = nil, stack = nil, view = "GROUPED_BY_ITEM"},
             [AL.VIEW_AUCTION_FINANCES]  = { sort = AL.SORT_ITEM_NAME_FLAT, quality = nil, stack = nil, view = "FLAT_LIST"},
@@ -144,6 +179,7 @@ function AL:InitializeDB()
     if type(_G.AL_SavedData.TooltipCache.recentlyViewedItems) ~= "table" then _G.AL_SavedData.TooltipCache.recentlyViewedItems = {} end
     if type(_G.AL_SavedData.WarbandCache) ~= "table" then _G.AL_SavedData.WarbandCache = {} end
     if type(_G.AL_SavedData.AuctionCache) ~= "table" then _G.AL_SavedData.AuctionCache = {} end
+    if type(_G.AL_SavedData.MailCache) ~= "table" then _G.AL_SavedData.MailCache = {} end
 end
 
 -- [[ REWRITTEN: RecordTransaction is now the central point for all financial calculations ]]
@@ -178,7 +214,7 @@ function AL:RecordTransaction(transactionType, source, itemID, value, quantity)
     end
 end
 
-function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
+function AL:InternalAddItem(itemLink, forCharName, forCharRealm, sourceDetails)
     local itemName, realItemLink, itemRarity, _, _, _, _, maxStack, _, itemTexture = GetItemInfo(itemLink);
     
     if not itemName or not itemTexture or not realItemLink then
@@ -206,9 +242,10 @@ function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
     local isStackable = (tonumber(maxStack) or 1) > 1
     local defaultQuantity = isStackable and (tonumber(maxStack) or 100) or 1
 
+    -- [[ DIRECTIVE: Memory Optimization & Mail Persistence ]]
+    -- awaitingMailCount has been removed and is now handled by the persistent MailCache.
     _G.AL_SavedData.Items[itemID].characters[charKey] = {
-        characterName = forCharName, characterRealm = forCharRealm, itemLink = realItemLink, itemRarity = itemRarity,
-        awaitingMailCount = 0, -- [[ DIRECTIVE: Mail Persistence ]]
+        characterName = forCharName, characterRealm = forCharRealm,
         safetyNetBuyout = 0, normalBuyoutPrice = 0, undercutAmount = 0, autoUpdateFromMarket = true,
         auctionSettings = { duration = 720, quantity = defaultQuantity },
         marketData = { lastScan = 0, minBuyout = 0, marketValue = 0, numAuctions = 0, ALMarketPrice = 0 },
@@ -217,6 +254,15 @@ function AL:InternalAddItem(itemLink, forCharName, forCharRealm)
         totalVendorBoughtQty = 0, totalVendorSoldQty = 0, totalVendorProfit = 0, totalVendorLoss = 0,
     }
     
+    -- [[ DIRECTIVE: Mail Persistence - Update cache for new items ]]
+    -- If the item was added as a result of an AH purchase, add it to the MailCache.
+    if sourceDetails and sourceDetails.source == "AUCTION_PURCHASE" and sourceDetails.quantity and sourceDetails.quantity > 0 then
+        if not _G.AL_SavedData.MailCache then _G.AL_SavedData.MailCache = {} end
+        if not _G.AL_SavedData.MailCache[charKey] then _G.AL_SavedData.MailCache[charKey] = {} end
+        
+        _G.AL_SavedData.MailCache[charKey][itemID] = (_G.AL_SavedData.MailCache[charKey][itemID] or 0) + sourceDetails.quantity
+    end
+
     self:ReconcileHistory(itemID, itemName)
     self:BuildSalesCache()
     
@@ -298,11 +344,16 @@ function AL:GetAllItemOwnershipDetails(charData_in)
     local allDetails = {}
     if not charData_in or not charData_in.characterName then return {} end
 
-    local itemID = self:GetItemIDFromLink(charData_in.itemLink)
+    -- [[ DIRECTIVE: Memory Optimization ]]
+    -- Get itemID and rarity from the top-level item entry.
+    local itemID = charData_in.itemID
+    local itemRarity = charData_in.itemRarity
     if not itemID then return {} end
 
     local charKey = charData_in.characterName .. "-" .. charData_in.characterRealm
-    local charData = _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey]
+    local itemEntry = _G.AL_SavedData.Items[itemID]
+    if not itemEntry then return {} end
+    local charData = itemEntry.characters[charKey]
     if not charData then return {} end
 
     local isCurrentCharacter = (charData_in.characterName == UnitName("player") and charData_in.characterRealm == GetRealmName())
@@ -319,7 +370,7 @@ function AL:GetAllItemOwnershipDetails(charData_in)
             isLink = (location == AL.LOCATION_BAGS)
         }
 
-        if location == AL.LOCATION_BAGS then d.colorR, d.colorG, d.colorB, d.colorA = GetItemQualityColor(charData_in.itemRarity or 1)
+        if location == AL.LOCATION_BAGS then d.colorR, d.colorG, d.colorB, d.colorA = GetItemQualityColor(itemRarity or 1)
         elseif location == AL.LOCATION_BANK then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_BANK_GOLD)
         elseif location == AL.LOCATION_MAIL then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_MAIL_TAN)
         elseif location == AL.LOCATION_AUCTION_HOUSE then d.colorR, d.colorG, d.colorB, d.colorA = unpack(AL.COLOR_AH_BLUE)
@@ -345,27 +396,15 @@ function AL:GetAllItemOwnershipDetails(charData_in)
         local totalInBagsBankAndReagent = C_Item.GetItemCount(itemID, true, false, true)
         local bankOnlyCount = totalInBagsBankAndReagent - totalInBagsAndReagent
         if bankOnlyCount > 0 then addDetail(AL.LOCATION_BANK, bankOnlyCount, false) end
-        
-        local isMailOpen = MailFrame and MailFrame:IsShown()
-        if isMailOpen and GetInboxNumItems then
-            local mailCount = 0
-            for i = 1, GetInboxNumItems() do
-                if select(8, GetInboxHeaderInfo(i)) then -- hasItem
-                    for j = 1, AL.MAX_MAIL_ATTACHMENTS_TO_SCAN do
-                        local link = GetInboxItemLink(i, j)
-                        if link and self:GetItemIDFromLink(link) == itemID then
-                            mailCount = mailCount + (select(4, GetInboxItem(i, j)) or 0)
-                        elseif not link then
-                            break
-                        end
-                    end
-                end
-            end
-            if mailCount > 0 then
-                addDetail(AL.LOCATION_MAIL, mailCount, false)
-                charData.awaitingMailCount = 0 -- Live scan confirms mail contents
-            end
-        end
+    end
+    
+    -- [[ DIRECTIVE: Mail Persistence - Reworked Logic ]]
+    -- This section now reads from the MailCache for all mail-related data.
+    local mailCache = _G.AL_SavedData.MailCache and _G.AL_SavedData.MailCache[charKey]
+    if mailCache and mailCache[itemID] and mailCache[itemID] > 0 then
+        -- Staleness is determined by whether the mailbox is currently open for the active character.
+        local isMailOpen = isCurrentCharacter and MailFrame and MailFrame:IsShown()
+        addDetail(AL.LOCATION_MAIL, mailCache[itemID], not isMailOpen, not isMailOpen and "Inside mailbox." or nil)
     end
 
     local isWarbandBankViewable = C_Bank.CanViewBank(Enum.BankType.Account)
@@ -403,11 +442,6 @@ function AL:GetAllItemOwnershipDetails(charData_in)
     if ahCachedCount and ahCachedCount > 0 then
         local isAHOpen = AuctionHouseFrame and AuctionHouseFrame:IsShown()
         addDetail(AL.LOCATION_AUCTION_HOUSE, ahCachedCount, not isAHOpen, not isAHOpen and "Being auctioned." or nil)
-    end
-
-    -- [[ DIRECTIVE: Mail Persistence ]]
-    if charData.awaitingMailCount and charData.awaitingMailCount > 0 then
-        addDetail(AL.LOCATION_MAIL, charData.awaitingMailCount, true, "In transit to mailbox.")
     end
 
     if #allDetails == 0 then
@@ -514,3 +548,4 @@ function AL:RemoveAllInstancesOfItem(itemIDToRemove)
         self:RefreshLedgerDisplay()
     end
 end
+

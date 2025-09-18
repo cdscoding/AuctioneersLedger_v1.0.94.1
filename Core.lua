@@ -24,9 +24,26 @@ function AL:ProcessPurchase(itemName, itemLink, quantity, price)
     local isTracked = (_G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID])
     
     if isTracked then
-        self:RecordTransaction("AUCTION_BUY", itemID, -price, quantity)
+        -- Bug Fix: Corrected transaction type from "AUCTION_BUY" to "BUY", "AUCTION" and made price positive.
+        self:RecordTransaction("BUY", "AUCTION", itemID, price, quantity)
     else
-        StaticPopup_Show("AL_CONFIRM_TRACK_NEW_PURCHASE", itemName, nil, { itemName = itemName, itemLink = itemLink, itemID = itemID, price = price, quantity = quantity })
+        -- [[ DIRECTIVE: Mail Persistence - Pass purchase context ]]
+        -- This tells the next function that the item is coming from an AH purchase and should be added to the MailCache.
+        local sourceDetails = { source = "AUCTION_PURCHASE", quantity = quantity }
+        
+        if _G.AL_SavedData and _G.AL_SavedData.Settings and _G.AL_SavedData.Settings.autoAddNewItems then
+            -- Bypass popup and add automatically
+            local success, msg = AL:InternalAddItem(itemLink, UnitName("player"), GetRealmName(), sourceDetails)
+            if success then
+                -- Retroactively record the transaction that triggered this
+                self:RecordTransaction("BUY", "AUCTION", itemID, price, quantity)
+                self:RefreshLedgerDisplay()
+            end
+        else
+            -- Show the confirmation popup, passing the sourceDetails along
+            local popupData = { itemName = itemName, itemLink = itemLink, itemID = itemID, price = price, quantity = quantity, sourceDetails = sourceDetails }
+            StaticPopup_Show("AL_CONFIRM_TRACK_NEW_PURCHASE", itemName, nil, popupData)
+        end
     end
 end
 
@@ -92,7 +109,6 @@ function AL:HandlePlayerLogin()
     C_Timer.After(0, function()
         AL:CreateFrames()
         AL:ApplyWindowState()
-        AL:StartStopPeriodicRefresh()
         AL.previousMoney = GetMoney()
         AL:BuildSalesCache()
     end)
@@ -210,15 +226,15 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
         
     elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
         -- [[ DIRECTIVE: Mail Persistence ]]
-        -- When a commodity is purchased, it goes to the mail. Flag it immediately.
+        -- When a commodity is purchased, it is added to the persistent MailCache.
         local itemID, quantity, price = ...
-        if not itemID then return end
+        if not itemID or quantity <= 0 then return end
         
         local charKey = UnitName("player") .. "-" .. GetRealmName()
-        if _G.AL_SavedData.Items and _G.AL_SavedData.Items[itemID] and _G.AL_SavedData.Items[itemID].characters[charKey] then
-            local charData = _G.AL_SavedData.Items[itemID].characters[charKey]
-            charData.awaitingMailCount = (charData.awaitingMailCount or 0) + quantity
-        end
+        if not _G.AL_SavedData.MailCache then _G.AL_SavedData.MailCache = {} end
+        if not _G.AL_SavedData.MailCache[charKey] then _G.AL_SavedData.MailCache[charKey] = {} end
+
+        _G.AL_SavedData.MailCache[charKey][itemID] = (_G.AL_SavedData.MailCache[charKey][itemID] or 0) + quantity
 
         C_Timer.After(2.0, function()
             local itemName, itemLink = GetItemInfo(itemID)
@@ -240,22 +256,30 @@ eventHandlerFrame:SetScript("OnEvent", function(selfFrame, event, ...)
             AL.previousMoney = currentMoney
         end
 
+    elseif event == "MAIL_SHOW" then
+        AL:ProcessMailboxUpdate()
+        AL:TriggerDebouncedRefresh(event)
     elseif event == "MAIL_INBOX_UPDATE" then
         if AL.mailRefreshTimer then AL.mailRefreshTimer:Cancel() end
         AL.mailRefreshTimer = C_Timer.After(AL.MAIL_REFRESH_DELAY, function()
-            AL:ProcessInboxForSales()
+            AL:ProcessMailboxUpdate()
             AL:TriggerDebouncedRefresh(event)
         end)
-
+    elseif event == "MAIL_CLOSED" then
+        -- The MailCache persists, so just trigger a refresh to update the view to "stale".
+        AL:TriggerDebouncedRefresh(event)
     elseif event == "AUCTION_HOUSE_SHOW_ERROR" then
         if AL.isPosting and AL.itemBeingPosted then AL:HandlePostFailure("Auction House Error: " .. (... or "Unknown")) end
 
     elseif event == "MERCHANT_SHOW" then
         AL:InitializeVendorHooks()
-        AL:TriggerDebouncedRefresh(event)
+        -- [[ DIRECTIVE: Performance - Remove unnecessary refresh ]]
+        -- The ledger does not need to refresh every time a vendor is opened.
+        -- AL:TriggerDebouncedRefresh(event)
     elseif event == "TRADE_SHOW" then
         AL:InitializeTradeHooks()
     else
         AL:TriggerDebouncedRefresh(event)
     end
 end)
+

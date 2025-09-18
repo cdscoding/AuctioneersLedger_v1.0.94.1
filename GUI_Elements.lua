@@ -206,7 +206,6 @@ local function createTabButton(parentFrame, name, text, viewMode, frameNameSuffi
     btn:SetScript("OnClick", function(selfBtn)
         AL.currentActiveTab = selfBtn.viewMode
         _G.AL_SavedData.Settings.activeViewMode = AL.currentActiveTab
-        AL:StartStopPeriodicRefresh()
         AL:RefreshLedgerDisplay()
     end)
     return btn
